@@ -11,6 +11,24 @@ export type ShellOption = {
   onSelect: () => void;
 };
 
+// Perimeter length and normalized landmark coordinates
+const L = 640 + 300 * Math.PI;
+const T1 = 320 / L; // ~0.202215 (top-right corner)
+const T_top_mid = T1 / 2; // ~0.101107 (top-center)
+const T2 = 0.5; // (bottom-right corner)
+const T3 = (640 + 150 * Math.PI) / L; // ~0.702215 (bottom-left corner)
+const T_bottom_mid = T2 + T_top_mid; // ~0.601107 (bottom-center)
+const T_right_mid = T1 + (T2 - T1) / 2; // ~0.351107 (right midpoint)
+const T_left_mid = T3 + (1.0 - T3) / 2; // ~0.851107 (left midpoint)
+
+const BOUNDS_6 = [0, T_top_mid, T1, T2, T_bottom_mid, T3, 1.0];
+const BOUNDS_5 = [0, T_top_mid, T1, T2 + T1 / 3, T2 + 2 * T1 / 3, 1.0];
+const BOUNDS_3 = [0, T_top_mid, T1, 1.0];
+const BOUNDS_2: [number, number][] = [
+  [T_left_mid, T_right_mid],
+  [T_right_mid, T_left_mid],
+];
+
 const BOUNDS_10 = [
   0,
   0.2022 / 4,
@@ -49,31 +67,31 @@ const BOUNDS_18 = [
 
 // Mathematically computed true 2D centroids for every segment geometry
 const CENTROIDS_2 = [
-  { cx: 430.0, cy: 118.3 }, // Top option (e.g. Surface, Notifications: On)
-  { cx: 430.0, cy: 361.7 }, // Bottom option (e.g. Lighting, Completion-message duration)
+  { cx: 430.0, cy: 118.5 }, // Top option (Surface, Notifications: On)
+  { cx: 430.0, cy: 361.5 }, // Bottom option (Lighting, Completion-message duration)
 ];
 
 const CENTROIDS_3 = [
-  { cx: 538.3, cy: 118.3 }, // Top-right option (e.g. Font, Balanced, Glass, Classic)
-  { cx: 430.0, cy: 361.7 }, // Bottom option (e.g. Font Size, Quiet, Translucent, Roundness)
-  { cx: 321.7, cy: 118.3 }, // Top-left option (e.g. Font Boldness, Luminous, Matte, Soft square)
+  { cx: 350.0, cy: 118.5 }, // Top-left option (Classic, Font, Matte, Luminous, System)
+  { cx: 510.0, cy: 118.5 }, // Top-right option (Soft square, Font Boldness, Glass, Balanced, Mono)
+  { cx: 430.0, cy: 361.5 }, // Bottom option (Roundness, Font Size, Translucent, Quiet, Humanist)
 ];
 
 const CENTROIDS_5 = [
-  { cx: 330.0, cy: 118.3 }, // Top-left (Show HUD)
-  { cx: 530.0, cy: 118.3 }, // Top-right (Countdown badge)
-  { cx: 600.0, cy: 361.7 }, // Bottom-right (Auto-hide)
-  { cx: 430.0, cy: 361.7 }, // Bottom-center (HUD duration)
-  { cx: 260.0, cy: 361.7 }, // Bottom-left (Test countdown)
+  { cx: 350.0, cy: 118.5 }, // Top-left (Show HUD)
+  { cx: 510.0, cy: 118.5 }, // Top-right (Countdown badge)
+  { cx: 540.0, cy: 361.5 }, // Bottom-right (Auto-hide)
+  { cx: 430.0, cy: 361.5 }, // Bottom-center (HUD duration)
+  { cx: 320.0, cy: 361.5 }, // Bottom-left (Test countdown)
 ];
 
 const CENTROIDS_6 = [
-  { cx: 321.7, cy: 118.3 }, // Colour — top-left
-  { cx: 538.3, cy: 118.3 }, // Text — top-right
-  { cx: 692.3, cy: 240.0 }, // Material — right
-  { cx: 538.3, cy: 361.7 }, // Notifications — bottom-right
-  { cx: 321.7, cy: 361.7 }, // Behaviour & Timing — bottom-left
-  { cx: 167.7, cy: 240.0 }, // Shape — left
+  { cx: 350.0, cy: 118.5 }, // Colour — top-left
+  { cx: 510.0, cy: 118.5 }, // Text — top-right
+  { cx: 700.0, cy: 240.0 }, // Material — right
+  { cx: 510.0, cy: 361.5 }, // Notifications — bottom-right
+  { cx: 350.0, cy: 361.5 }, // Behaviour & Timing — bottom-left
+  { cx: 160.0, cy: 240.0 }, // Shape — left
 ];
 
 const CENTROIDS_10 = [
@@ -99,21 +117,24 @@ export function SegmentedCapsuleShell({
   const reduced = useReducedMotion();
   const extended = options.length > 10;
   const is10 = options.length === 10;
-  const useShellGeometry = extended || is10;
 
-  const bounds = extended
-    ? BOUNDS_18
-    : is10
-      ? BOUNDS_10
-      : options.length === 6
-        ? [0, 0.145, 0.355, 0.5, 0.645, 0.855, 1]
-        : options.length === 5
-          ? [0, 0.22, 0.45, 0.62, 0.82, 1]
-          : options.length === 3
-            ? [0, 0.355, 0.645, 1]
-            : options.length === 2
-              ? [0, 0.5, 1]
-              : Array.from({ length: options.length + 1 }, (_, i) => i / options.length);
+  const getSegmentBounds = (index: number): [number, number] => {
+    if (options.length === 2) {
+      return BOUNDS_2[index] ?? [0, 0.5];
+    }
+    const b = extended
+      ? BOUNDS_18
+      : is10
+        ? BOUNDS_10
+        : options.length === 6
+          ? BOUNDS_6
+          : options.length === 5
+            ? BOUNDS_5
+            : options.length === 3
+              ? BOUNDS_3
+              : Array.from({ length: options.length + 1 }, (_, k) => k / options.length);
+    return [b[index] ?? 0, b[index + 1] ?? 1];
+  };
 
   // Segment centroid lookup
   const getCentroid = (index: number) => {
@@ -122,11 +143,9 @@ export function SegmentedCapsuleShell({
     if (options.length === 5) return CENTROIDS_5[index] ?? { cx: 430, cy: 240 };
     if (options.length === 6) return CENTROIDS_6[index] ?? { cx: 430, cy: 240 };
     if (options.length === 10) return CENTROIDS_10[index] ?? { cx: 430, cy: 240 };
-    const start = bounds[index] ?? 0;
-    const end = bounds[index + 1] ?? 1;
-    const p = useShellGeometry
-      ? shellPoint((start + end) / 2, 122)
-      : stadiumPoint((start + end) / 2, 122);
+    const [start, end] = getSegmentBounds(index);
+    const mid = end >= start ? (start + end) / 2 : (start + end + 1.0) / 2 % 1.0;
+    const p = shellPoint(mid, 121.5);
     return { cx: p.x, cy: p.y };
   };
 
@@ -139,12 +158,11 @@ export function SegmentedCapsuleShell({
       className={`shell-svg ${extended ? "extended-shell" : ""} ${isExiting ? "is-exiting" : ""}`}
       viewBox="0 0 860 480"
       aria-label="Capsule options"
-      initial={isEntering ? { opacity: 0, scale: reduced ? 1 : 0.94 } : false}
+      initial={isEntering ? { opacity: 0.7 } : false}
       animate={{
         opacity: isExiting ? 0 : 1,
-        scale: isExiting ? (reduced ? 1 : 0.94) : 1,
       }}
-      transition={{ duration: reduced ? 0.1 : isExiting ? 0.18 : 0.32, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: reduced ? 0.08 : isExiting ? 0.14 : 0.22, ease: "easeOut" }}
     >
       <defs>
         <linearGradient id="shell-surface" x1="0" y1="0" x2=".3" y2="1">
@@ -156,17 +174,15 @@ export function SegmentedCapsuleShell({
       </defs>
 
       {options.map((option, i) => {
-        const gapFrac = extended ? 0.002 : 0.003;
-        const start = (bounds[i] ?? 0) + gapFrac;
-        const end = (bounds[i + 1] ?? 1) - gapFrac;
+        const gapFrac = extended ? 0.0015 : 0.002;
+        const [rawStart, rawEnd] = getSegmentBounds(i);
+        const start = (rawStart + gapFrac) % 1.0;
+        const end = (rawEnd - gapFrac + 1.0) % 1.0;
 
         const { cx, cy } = getCentroid(i);
         const Icon = option.icon;
 
-        const extendedPath = shellSegmentPath(start, end, 166, 78);
-        const pathD = useShellGeometry
-          ? shellSegmentPath(start, end, 165, 78)
-          : `${perimeterPath(start, end, 165)} ${perimeterPath(end, start, 78, false)} Z`;
+        const pathD = shellSegmentPath(start, end, extended ? 166 : 165, 78);
 
         return (
           <motion.g
@@ -187,13 +203,23 @@ export function SegmentedCapsuleShell({
                 option.onSelect();
               }
             }}
-            initial={isEntering ? { opacity: 0 } : false}
+            initial={isEntering ? { opacity: 0.8 } : false}
             animate={{ opacity: 1 }}
-            transition={{ delay: reduced ? 0 : Math.min(0.04, i * 0.012), duration: 0.2 }}
+            transition={{ duration: reduced ? 0.08 : 0.16 }}
           >
-            <path d={extended ? extendedPath : pathD} fill="url(#shell-surface)" strokeWidth="1" />
+            <path d={pathD} fill="url(#shell-surface)" strokeWidth="1" />
+            {/* Minimum 44x44px touch target on mobile viewports */}
+            <rect
+              x={cx - 60}
+              y={cy - 60}
+              width={120}
+              height={120}
+              fill="transparent"
+              pointerEvents="all"
+              aria-hidden="true"
+            />
 
-            <g pointerEvents="none">
+            <g pointerEvents="auto">
               {/* Option Rendering by Type */}
               {extended && option.colour ? (
                 (() => {
@@ -550,45 +576,7 @@ export function SegmentedCapsuleShell({
                   </text>
                 </g>
               ) : option.label === "Behaviour & Timing" && Icon ? (
-                <g>
-                  <Icon
-                    x={cx - 9}
-                    y={cy - 30}
-                    width={18}
-                    height={18}
-                    strokeWidth={1.4}
-                    className="segment-icon"
-                  />
-                  <text x={cx} y={cy + 6} textAnchor="middle" className="segment-label">
-                    <tspan x={cx} dy="0">
-                      Behaviour
-                    </tspan>
-                    <tspan x={cx} dy="13">
-                      &amp; Timing
-                    </tspan>
-                  </text>
-                </g>
-              ) : option.label === "Completion-message duration" && Icon ? (
-                <g>
-                  <Icon
-                    x={cx - 9}
-                    y={cy - 30}
-                    width={18}
-                    height={18}
-                    strokeWidth={1.4}
-                    className="segment-icon"
-                  />
-                  <text x={cx} y={cy + 6} textAnchor="middle" className="segment-label">
-                    <tspan x={cx} dy="0">
-                      Completion-message
-                    </tspan>
-                    <tspan x={cx} dy="13">
-                      duration
-                    </tspan>
-                  </text>
-                </g>
-              ) : Icon ? (
-                <g>
+                <g pointerEvents="auto">
                   <Icon
                     x={cx - 9}
                     y={cy - 24}
@@ -597,7 +585,45 @@ export function SegmentedCapsuleShell({
                     strokeWidth={1.4}
                     className="segment-icon"
                   />
-                  <text x={cx} y={cy + 18} textAnchor="middle" className="segment-label">
+                  <text x={cx} y={cy + 8} textAnchor="middle" className="segment-label">
+                    <tspan x={cx} dy="0">
+                      Behaviour
+                    </tspan>
+                    <tspan x={cx} dy="16">
+                      &amp; Timing
+                    </tspan>
+                  </text>
+                </g>
+              ) : option.label === "Completion-message duration" && Icon ? (
+                <g pointerEvents="auto">
+                  <Icon
+                    x={cx - 9}
+                    y={cy - 24}
+                    width={18}
+                    height={18}
+                    strokeWidth={1.4}
+                    className="segment-icon"
+                  />
+                  <text x={cx} y={cy + 8} textAnchor="middle" className="segment-label">
+                    <tspan x={cx} dy="0">
+                      Completion-message
+                    </tspan>
+                    <tspan x={cx} dy="16">
+                      duration
+                    </tspan>
+                  </text>
+                </g>
+              ) : Icon ? (
+                <g pointerEvents="auto">
+                  <Icon
+                    x={cx - 9}
+                    y={cy - 20}
+                    width={18}
+                    height={18}
+                    strokeWidth={1.4}
+                    className="segment-icon"
+                  />
+                  <text x={cx} y={cy + 16} textAnchor="middle" className="segment-label">
                     {option.label}
                   </text>
                 </g>

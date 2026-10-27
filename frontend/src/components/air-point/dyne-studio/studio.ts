@@ -494,8 +494,31 @@ export function shellArc(t1: number, t2: number, radius: number, move = true) {
   return d;
 }
 
+export function shellArcClockwise(t1: number, t2: number, radius: number, move = true): string {
+  if (t1 <= t2) {
+    return shellArc(t1, t2, radius, move);
+  }
+  const arc1 = shellArc(t1, 1.0, radius, move);
+  const arc2 = shellArc(0.0, t2, radius, false);
+  return `${arc1} ${arc2}`;
+}
+
+export function shellArcCounterClockwise(
+  t1: number,
+  t2: number,
+  radius: number,
+  move = false,
+): string {
+  if (t1 >= t2) {
+    return shellArc(t1, t2, radius, move);
+  }
+  const arc1 = shellArc(t1, 0.0, radius, move);
+  const arc2 = shellArc(1.0, t2, radius, false);
+  return `${arc1} ${arc2}`;
+}
+
 export function shellSegmentPath(t1: number, t2: number, outerR = 165, innerR = 78) {
-  const outer = shellArc(t1, t2, outerR, true);
-  const inner = shellArc(t2, t1, innerR, false);
+  const outer = shellArcClockwise(t1, t2, outerR, true);
+  const inner = shellArcCounterClockwise(t2, t1, innerR, false);
   return `${outer} ${inner} Z`;
 }

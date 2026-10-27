@@ -1,0 +1,46 @@
+{
+  "viewportsTested": [
+    "1440x900_desktop",
+    "1120x800_laptop",
+    "820x1180_tablet",
+    "390x844_mobile"
+  ],
+  "labelCenteringDeltas": [],
+  "capsuleClearances": [
+    24.0458984375,
+    18.2421875,
+    10.8642578125,
+    8.46484375
+  ],
+  "centerLineDeltas": [
+    0.0234375,
+    0.015625,
+    0.0078125,
+    0.015625
+  ],
+  "minFontSizes": [
+    15,
+    15,
+    15,
+    15
+  ],
+  "touchTargetMinDimensions": [],
+  "hostAppearanceWrites": [],
+  "hostOperationalWrites": [
+    {
+      "time": 1793128369545,
+      "body": {
+        "island_notifications_enabled": false
+      }
+    }
+  ],
+  "transitionEmptyFrames": 0,
+  "tortureTestClicksAccepted": 10,
+  "errorsEncountered": [],
+  "passedGates": [
+    "GATE_VIEWPORTS_AND_GEOMETRY",
+    "GATE_ALL_LAYER_SCREENSHOTS",
+    "GATE_SCREENCAST_RECORDING",
+    "GATE_OFFLINE_TRUTHFULNESS"
+  ]
+}

@@ -278,22 +278,22 @@ export function CapsuleAdjustmentTrack({
           {/* Current value badge attached directly to the handle */}
           <g className="track-handle-badge" pointerEvents="none">
             <rect
-              x={point.x - 20}
-              y={point.y - 28}
-              width={40}
-              height={18}
-              rx={9}
+              x={point.x - 24}
+              y={point.y - 32}
+              width={48}
+              height={20}
+              rx={10}
               fill="rgba(6, 11, 18, 0.94)"
               stroke={accent}
               strokeWidth={1}
             />
             <text
               x={point.x}
-              y={point.y - 18}
+              y={point.y - 21}
               textAnchor="middle"
               dominantBaseline="central"
               fill="#ffffff"
-              fontSize={10}
+              fontSize={12}
               fontWeight={600}
               fontFamily="'Courier New', monospace"
             >

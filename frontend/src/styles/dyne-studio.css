@@ -583,23 +583,23 @@
   );
 }
 
-/* Lighter, contrasting, softly faded backdrop behind the capsule for Texture mode */
+/* Soft, feathered contrasting illumination behind the capsule for Texture mode */
 .dyne-studio-root .texture-preview-backdrop {
   position: absolute;
-  left: 18%;
-  top: 28%;
-  width: 64%;
-  height: 44%;
+  left: 20%;
+  top: 32%;
+  width: 60%;
+  height: 36%;
   pointer-events: none;
-  border-radius: 70px;
+  border-radius: 9999px;
   background: radial-gradient(
-    ellipse 65% 55% at 50% 50%,
-    rgba(190, 225, 255, 0.55) 0%,
-    rgba(125, 185, 245, 0.32) 42%,
-    rgba(55, 105, 175, 0.12) 70%,
-    transparent 88%
+    ellipse at center,
+    rgba(190, 225, 255, 0.4) 0%,
+    rgba(125, 185, 245, 0.2) 40%,
+    rgba(55, 105, 175, 0.05) 70%,
+    transparent 100%
   );
-  box-shadow: 0 0 65px 24px rgba(135, 195, 255, 0.28);
+  filter: blur(14px);
   z-index: 1;
   animation: texture-backdrop-fade 0.3s ease-out;
 }
@@ -1289,7 +1289,7 @@
   z-index: 10;
   white-space: nowrap;
   pointer-events: none;
-  font-size: 11px;
+  font-size: 12px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-weight: 600;
   color: #a4c2e0;
@@ -1333,33 +1333,42 @@
     min-height: 280px;
   }
   .dyne-studio-root .capsule-assembly {
-    width: 95%;
-    min-height: 260px;
+    width: min(344px, 96%);
   }
   .dyne-studio-root .central-capsule {
-    left: 8%;
-    width: 84%;
-    top: 32%;
-    height: 36%;
-    min-height: 52px;
-    --capsule-font-size: 14px;
-    padding: 4px 8px;
+    left: 24.42%;
+    width: 51.16%;
+    top: 38.33%;
+    height: 23.34%;
+    --capsule-font-size: 13px;
+    padding: 2px 4px;
   }
   .dyne-studio-root .central-capsule .capsule-content {
-    gap: 8px;
+    gap: 6px;
   }
   .dyne-studio-root .central-capsule .activity-mark {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
   }
   .dyne-studio-root .central-capsule .activity-mark svg {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
   }
   .dyne-studio-root .central-capsule .capsule-preview-on-capsule {
     top: -10px;
-    right: 12px;
-    font-size: 9.5px;
+    right: 8px;
+    font-size: 12px;
     padding: 1px 6px;
+  }
+  .dyne-studio-root .capsule-nav-arrow {
+    top: auto;
+    bottom: 6px;
+    transform: none;
+  }
+  .dyne-studio-root .capsule-nav-prev {
+    left: 8px;
+  }
+  .dyne-studio-root .capsule-nav-next {
+    right: 8px;
   }
 }

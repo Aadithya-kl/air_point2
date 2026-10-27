@@ -68,7 +68,7 @@ function getCategoryCrumb(view: View): string {
 export interface DyneStudioProps {
   hostAdapter?: DyneHostAdapter;
   capabilities?: CapabilityMap;
-  desktopSettings?: AirPointHudSettings;
+  desktopSettings?: AirPointHudSettings | null;
   hostConnected?: boolean;
   settingsSynced?: boolean;
 }
@@ -110,6 +110,21 @@ export function DyneStudio({
   const [isRgbDragging, setIsRgbDragging] = useState(false);
   const [isTrackDragging, setIsTrackDragging] = useState(false);
 
+  // Live local states for duration sliders (responsive dragging without stale host write races)
+  const [localCompletionDuration, setLocalCompletionDuration] = useState<number | null>(null);
+  const [localHudDuration, setLocalHudDuration] = useState<number | null>(null);
+  const [isInFlight, setIsInFlight] = useState(false);
+  const mutationVersion = useRef(0);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync local duration when desktopSettings change externally and not currently in flight
+  useEffect(() => {
+    if (!isInFlight) {
+      setLocalCompletionDuration(null);
+      setLocalHudDuration(null);
+    }
+  }, [desktopSettings?.completionDurationS, desktopSettings?.hudDurationS, isInFlight]);
+
   // The displayed heading derives from synchronized transition timing (never leads incoming content)
   const [displayedTitle, setDisplayedTitle] = useState<string>("Your capsule. Your way.");
   const [displayedCrumb, setDisplayedCrumb] = useState<string>("Main options");
@@ -119,6 +134,60 @@ export function DyneStudio({
   const headingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSwitcherEnabled = activeView.kind === "rest" || activeView.kind === "main";
+
+  const commitCompletion = useCallback(
+    async (val: number) => {
+      if (!hostAdapter || !settingsSynced || !hostConnected) return;
+      const currentVersion = ++mutationVersion.current;
+      setIsInFlight(true);
+      try {
+        const ok = await commitDesktopSettings(
+          hostAdapter,
+          { completionDurationS: val },
+          capabilities,
+        );
+        if (mutationVersion.current === currentVersion && !ok) {
+          setLocalCompletionDuration(null);
+        }
+      } catch {
+        if (mutationVersion.current === currentVersion) {
+          setLocalCompletionDuration(null);
+        }
+      } finally {
+        if (mutationVersion.current === currentVersion) {
+          setIsInFlight(false);
+        }
+      }
+    },
+    [hostAdapter, settingsSynced, hostConnected, capabilities],
+  );
+
+  const commitHud = useCallback(
+    async (val: number) => {
+      if (!hostAdapter || !settingsSynced || !hostConnected) return;
+      const currentVersion = ++mutationVersion.current;
+      setIsInFlight(true);
+      try {
+        const ok = await commitDesktopSettings(hostAdapter, { hudDurationS: val }, capabilities);
+        if (mutationVersion.current === currentVersion && !ok) {
+          setLocalHudDuration(null);
+        }
+      } catch {
+        if (mutationVersion.current === currentVersion) {
+          setLocalHudDuration(null);
+        }
+      } finally {
+        if (mutationVersion.current === currentVersion) {
+          setIsInFlight(false);
+        }
+      }
+    },
+    [hostAdapter, settingsSynced, hostConnected, capabilities],
+  );
+
+  const activeCompletionDuration =
+    localCompletionDuration ?? desktopSettings?.completionDurationS ?? 2;
+  const activeHudDuration = localHudDuration ?? desktopSettings?.hudDurationS ?? 120;
 
   const change = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setCapsulesSettings((prev) => {
@@ -162,25 +231,20 @@ export function DyneStudio({
       if (transitionTimer.current) clearTimeout(transitionTimer.current);
       if (headingTimer.current) clearTimeout(headingTimer.current);
 
+      setActiveView(target);
+      setDisplayedTitle(getTitle(target));
+      setDisplayedCrumb(getCategoryCrumb(target));
+
       if (reduced || target.kind === "rest") {
-        setActiveView(target);
-        setDisplayedTitle(getTitle(target));
-        setDisplayedCrumb(getCategoryCrumb(target));
         setTransitionState("idle");
         return;
       }
 
-      setActiveView(target);
       setTransitionState("transitioning");
-
-      headingTimer.current = setTimeout(() => {
-        setDisplayedTitle(getTitle(target));
-        setDisplayedCrumb(getCategoryCrumb(target));
-      }, 80);
 
       transitionTimer.current = setTimeout(() => {
         setTransitionState("idle");
-      }, 200);
+      }, 180);
     },
     [reduced],
   );
@@ -415,7 +479,7 @@ export function DyneStudio({
       }
 
       if (targetView.category === "Text") {
-        return ["Font", "Font Size", "Font Boldness"].map((label) => ({
+        return ["Font", "Font Boldness", "Font Size"].map((label) => ({
           label,
           icon: Type,
           onSelect: () =>
@@ -432,15 +496,15 @@ export function DyneStudio({
             onSelect: () => apply("roundness", 56),
           },
           {
-            label: "Roundness",
-            icon: SlidersHorizontal,
-            onSelect: () => adjust("Roundness", "Shape"),
-          },
-          {
             label: "Soft square",
             icon: Minus,
             selected: settings.roundness === 28,
             onSelect: () => apply("roundness", 28),
+          },
+          {
+            label: "Roundness",
+            icon: SlidersHorizontal,
+            onSelect: () => adjust("Roundness", "Shape"),
           },
         ];
       }
@@ -628,15 +692,20 @@ export function DyneStudio({
 
     const key = layerView.kind === "category" ? layerView.category : layerView.kind;
     return (
-      <SegmentedCapsuleShell key={`shell-${key}-${state}`} options={opts} transitionState={state} />
+      <SegmentedCapsuleShell key={`shell-${key}`} options={opts} transitionState={state} />
     );
   };
 
   const isTextureActive =
-    (activeView.kind === "category" && activeView.category === "Material") ||
     (activeView.kind === "materialGroup" && activeView.group === "Surface") ||
     (activeView.kind === "adjust" &&
       ["Glass", "Matte", "Translucent"].includes(activeView.adjustment));
+
+  const hostStatusText = !settingsSynced
+    ? "HOST OFFLINE · SETTINGS UNSYNCED"
+    : !hostConnected
+      ? "HOST OFFLINE · LAST KNOWN SETTINGS"
+      : "HOST CONNECTED";
 
   return (
     <MotionConfig reducedMotion="user">
@@ -647,7 +716,7 @@ export function DyneStudio({
               <div className="brand-eyebrow">
                 AIRPOINT <span>/</span> DYNE
               </div>
-              <h1>
+              <h1 aria-label="Dyne Studio">
                 Dyne Studio
                 <span className="title-dot" aria-hidden="true">
                   .
@@ -657,7 +726,7 @@ export function DyneStudio({
             </div>
             <div className="header-note">
               <span className="mode-dot" />
-              {hostConnected && settingsSynced ? "HOST CONNECTED" : "LOCAL PREVIEW"}
+              <span>{hostStatusText}</span>
               <span className="header-divider" />
               <span>STUDIO 01</span>
             </div>
@@ -763,17 +832,15 @@ export function DyneStudio({
             {activeView.kind === "category" &&
               (activeView.category === "Notifications" ||
                 activeView.category === "Behaviour & Timing") && (
-                <div className="dyne-host-controls" aria-label="Desktop operational settings">
-                  {!settingsSynced && (
-                    <p role="status">WAITING FOR HOST SYNC — operational controls are disabled.</p>
-                  )}
-                  {settingsSynced && !hostConnected && (
-                    <p role="status">HOST OFFLINE — showing last known settings.</p>
-                  )}
-                  {settingsSynced && hostConnected && <p role="status">HOST CONNECTED</p>}
+                <div
+                  className="dyne-host-controls"
+                  aria-label="Desktop operational settings"
+                  aria-busy={isInFlight}
+                >
+                  <p role="status">{hostStatusText}</p>
                   {activeView.category === "Notifications" && (
                     <label>
-                      Completion-message duration: {desktopSettings?.completionDurationS ?? "—"} s
+                      Completion-message duration: {activeCompletionDuration} s
                       <input
                         aria-label="Completion-message duration"
                         type="range"
@@ -781,22 +848,29 @@ export function DyneStudio({
                         max="5"
                         step="0.5"
                         disabled={!settingsSynced || !hostConnected || !hostAdapter}
-                        value={desktopSettings?.completionDurationS ?? 2}
+                        value={activeCompletionDuration}
                         onChange={(e) => {
-                          const value = Number(e.currentTarget.value);
-                          if (hostAdapter)
-                            void commitDesktopSettings(
-                              hostAdapter,
-                              { completionDurationS: value },
-                              capabilities,
-                            );
+                          const val = Number(e.currentTarget.value);
+                          setLocalCompletionDuration(val);
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          debounceTimer.current = setTimeout(() => {
+                            void commitCompletion(val);
+                          }, 300);
+                        }}
+                        onPointerUp={(e) => {
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          void commitCompletion(Number(e.currentTarget.value));
+                        }}
+                        onKeyUp={(e) => {
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          void commitCompletion(Number(e.currentTarget.value));
                         }}
                       />
                     </label>
                   )}
                   {activeView.category === "Behaviour & Timing" && (
                     <label>
-                      HUD duration: {desktopSettings?.hudDurationS ?? "—"} s
+                      HUD duration: {activeHudDuration} s
                       <input
                         aria-label="HUD duration"
                         type="range"
@@ -804,15 +878,22 @@ export function DyneStudio({
                         max="1800"
                         step="10"
                         disabled={!settingsSynced || !hostConnected || !hostAdapter}
-                        value={desktopSettings?.hudDurationS ?? 120}
+                        value={activeHudDuration}
                         onChange={(e) => {
-                          const value = Number(e.currentTarget.value);
-                          if (hostAdapter)
-                            void commitDesktopSettings(
-                              hostAdapter,
-                              { hudDurationS: value },
-                              capabilities,
-                            );
+                          const val = Number(e.currentTarget.value);
+                          setLocalHudDuration(val);
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          debounceTimer.current = setTimeout(() => {
+                            void commitHud(val);
+                          }, 300);
+                        }}
+                        onPointerUp={(e) => {
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          void commitHud(Number(e.currentTarget.value));
+                        }}
+                        onKeyUp={(e) => {
+                          if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                          void commitHud(Number(e.currentTarget.value));
                         }}
                       />
                     </label>

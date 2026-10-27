@@ -15,7 +15,7 @@ async function run() {
   try {
     const page = await browser.newPage()
     await page.setViewport({ width: 390, height: 844 })
-    await page.goto('http://localhost:5199/island', { waitUntil: 'networkidle0' })
+    await page.goto('http://127.0.0.1:5173/island', { waitUntil: 'networkidle0' })
     await new Promise(r => setTimeout(r, 600))
 
     const details = await page.evaluate(() => {
@@ -58,7 +58,28 @@ async function run() {
       }
     })
 
-    console.log('Mobile 390x844 layout details:\n', JSON.stringify(details, null, 2))
+    await page.evaluate(() => document.querySelector('.central-capsule').click());
+    await new Promise(r => setTimeout(r, 400));
+
+    const hits = await page.evaluate(() => {
+      const opts = Array.from(document.querySelectorAll('.shell-option'));
+      return opts.map(opt => {
+        const text = opt.querySelector('text');
+        const rect = text ? text.getBoundingClientRect() : null;
+        if (!rect) return { label: opt.getAttribute('aria-label'), error: 'no text' };
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const hit = document.elementFromPoint(cx, cy);
+        return {
+          label: opt.getAttribute('aria-label'),
+          cx, cy,
+          hitTag: hit ? hit.tagName : null,
+          hitClass: hit ? (typeof hit.className === 'string' ? hit.className : hit.className.baseVal) : null,
+          matches: hit === text || opt.contains(hit)
+        };
+      });
+    });
+    console.log('Hits:\n', JSON.stringify(hits, null, 2));
   } finally {
     await browser.close()
   }
