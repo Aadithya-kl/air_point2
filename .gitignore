@@ -1,0 +1,31 @@
+# AirPoint Root .gitignore
+
+# Python
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+backend/screenshots/
+
+# Frontend
+frontend/node_modules/
+node_modules/
+frontend/.output/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vinxi/
+frontend/.tanstack/**
+frontend/.nitro/
+
+# Bridge Runtime Artifacts
+backend/bridge_info.json
+backend/.bridge_token
+bridge_info.json
+.bridge_token
+
+# OS and Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

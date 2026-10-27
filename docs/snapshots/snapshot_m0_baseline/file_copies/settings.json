@@ -1,0 +1,15 @@
+{
+  "hold": 3.0,
+  "sensitivity": 0.85,
+  "smoothing": 65,
+  "enabled": {
+    "pointer": false,
+    "drag": false,
+    "screenshot": true,
+    "whatsapp": true,
+    "mute": true,
+    "volume-up": true,
+    "volume-down": true,
+    "wakanda-forever": true
+  }
+}

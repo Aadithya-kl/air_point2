@@ -1,0 +1,22 @@
+{
+  "hold": 3.0,
+  "sensitivity": 0.85,
+  "smoothing": 65,
+  "enabled": {
+    "pointer": true,
+    "drag": false,
+    "screenshot": true,
+    "whatsapp": true,
+    "mute": true,
+    "volume-up": true,
+    "volume-down": true,
+    "wakanda-forever": true
+  },
+  "power_save": false,
+  "island_enabled": true,
+  "island_notifications_enabled": true,
+  "island_timer_enabled": true,
+  "island_autohide_enabled": true,
+  "island_hud_duration_s": 120.0,
+  "island_completion_duration_s": 2.0
+}

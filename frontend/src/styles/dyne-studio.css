@@ -1,0 +1,1365 @@
+/* ============================================================================
+   DYNE STUDIO — SCOPED STYLES
+   Integrated from Dyne Studio reference design
+   Scoped within .dyne-studio-root to avoid polluting the rest of AirPoint
+   ============================================================================ */
+
+.dyne-studio-root {
+  --studio-bg: transparent;
+  --studio-text: #edf1f7;
+  --studio-muted: #8190a3;
+  --studio-blue: #84b8e8;
+  background: transparent;
+  color: var(--studio-text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  border-radius: 0;
+  overflow: visible;
+  position: relative;
+  border: none;
+  box-shadow: none;
+  width: 100%;
+}
+
+.dyne-studio-root .studio {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 480px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--studio-text);
+}
+
+.dyne-studio-root .studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 24px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+
+/* Typography sizes: minimum 12px for all visible stage text */
+.dyne-studio-root .brand-eyebrow,
+.dyne-studio-root .eyebrow,
+.dyne-studio-root .header-note,
+.dyne-studio-root .stage-topline,
+.dyne-studio-root .stage-bottomline,
+.dyne-studio-root .stage-instruction > span {
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  letter-spacing: 2.2px;
+}
+
+.dyne-studio-root .brand-eyebrow {
+  color: #a4bdd2;
+  font-size: 12px;
+  letter-spacing: 3px;
+}
+.dyne-studio-root .brand-eyebrow span {
+  color: #435465;
+  margin: 0 9px;
+}
+
+.dyne-studio-root .studio-header h1 {
+  font-size: 29px;
+  font-weight: 400;
+  letter-spacing: -0.9px;
+  margin: 11px 0 7px;
+  color: #f2f6fa;
+}
+.dyne-studio-root .title-dot {
+  color: #88b4d7;
+}
+.dyne-studio-root .studio-header p {
+  font-size: 13px;
+  color: #8a9aaa;
+}
+
+.dyne-studio-root .header-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #9ab2c7;
+  letter-spacing: 1.5px;
+  font-size: 12px;
+}
+.dyne-studio-root .mode-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #8ba8bc;
+  box-shadow: 0 0 8px #8ba8bc66;
+}
+.dyne-studio-root .header-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 12px;
+}
+.dyne-studio-root .header-note > span:last-child {
+  color: #6a7c90;
+}
+
+.dyne-studio-root .capsule-stage {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  position: relative;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.dyne-studio-root .capsule-stage.is-resting {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  min-height: 480px;
+}
+
+.dyne-studio-root .capsule-stage:not(.is-resting) {
+  min-height: 570px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(3, 6, 11, 0.64);
+  backdrop-filter: blur(24px) saturate(110%);
+  -webkit-backdrop-filter: blur(24px) saturate(110%);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 45px rgba(0, 0, 0, 0.45);
+}
+
+.dyne-studio-root .stage-topline,
+.dyne-studio-root .stage-bottomline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #7a8ea3;
+  padding: 20px 26px;
+  font-size: 12px;
+  letter-spacing: 1.4px;
+}
+
+.dyne-studio-root .stage-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 12px;
+}
+
+.dyne-studio-root .stage-index {
+  color: #b0c2d4;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  padding: 4px 7px;
+  font-size: 12px;
+  letter-spacing: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dyne-studio-root .active-crumb {
+  color: #b7d6f1;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.dyne-studio-root .live-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #7f93a5;
+}
+.dyne-studio-root .live-label > span {
+  width: 5px;
+  height: 5px;
+  background: #819c91;
+  border-radius: 50%;
+  box-shadow: 0 0 5px #819c91aa;
+}
+
+/* Stage Heading: fixed y-positions across all layers to eliminate layout shift */
+.dyne-studio-root .stage-heading {
+  text-align: center;
+  padding-top: 8px;
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.75);
+}
+
+.dyne-studio-root .eyebrow {
+  color: #7597b4;
+  font-size: 12px;
+  letter-spacing: 2.5px;
+}
+
+.dyne-studio-root .stage-heading h2 {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.5px;
+  color: #d0d9e3;
+  min-height: 32px;
+}
+
+.dyne-studio-root .interaction-frame {
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 330px;
+}
+
+.dyne-studio-root .capsule-assembly {
+  width: min(880px, 92%);
+  aspect-ratio: 860 / 480;
+  position: relative;
+  container-type: inline-size;
+}
+
+.dyne-studio-root .two-ring-colour-palette {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.dyne-studio-root .two-ring-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.dyne-studio-root .two-ring-svg .shell-option > path {
+  stroke: #26384a;
+  transition:
+    stroke 0.2s,
+    filter 0.2s;
+}
+
+.dyne-studio-root .two-ring-svg .shell-option:hover > path,
+.dyne-studio-root .two-ring-svg .shell-option:focus-visible > path {
+  stroke: #86c0f8;
+  filter: drop-shadow(0 0 6px rgba(100, 180, 255, 0.45));
+}
+
+.dyne-studio-root .two-ring-svg .shell-option.selected > path {
+  stroke: #a2cded;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 6px rgba(140, 200, 255, 0.45));
+}
+
+.dyne-studio-root .two-ring-svg .segment-label {
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: -0.2px;
+}
+
+.dyne-studio-root .shell-svg,
+.dyne-studio-root .track-svg,
+.dyne-studio-root .adjustment-layer {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+}
+
+.dyne-studio-root .shell-option {
+  cursor: pointer;
+  outline: none;
+}
+
+.dyne-studio-root .extended-shell .segment-label {
+  font-size: 12px;
+  letter-spacing: -0.15px;
+}
+
+.dyne-studio-root .extended-shell .shell-option > path {
+  stroke: #2a3c4e;
+}
+
+.dyne-studio-root .shell-option > path {
+  stroke: #314457;
+  transition:
+    stroke 0.2s,
+    filter 0.2s;
+}
+
+.dyne-studio-root .shell-option:hover > path,
+.dyne-studio-root .shell-option:focus-visible > path {
+  stroke: #8cc3f5;
+  filter: drop-shadow(0 0 5px rgba(100, 180, 255, 0.35));
+}
+
+.dyne-studio-root .shell-option.selected > path {
+  stroke: #9dc2df;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 4px rgba(140, 200, 255, 0.28));
+}
+
+/* Category labels: 14-16px */
+.dyne-studio-root .segment-label {
+  fill: #e0e9f3;
+  font-size: 15px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+.dyne-studio-root .segment-icon {
+  color: #6bafeb;
+}
+
+/* Central capsule: permanently mounted across all states */
+.dyne-studio-root .central-capsule {
+  cursor: pointer;
+  position: absolute;
+  left: 24.42%;
+  top: 38.33%;
+  width: 51.16%;
+  height: 23.34%;
+  border-radius: var(--roundness, 56px);
+  color: var(--capsule-accent, #f4c75b);
+  padding: 5px;
+  border: 1px solid rgba(132, 184, 232, 0.4);
+  background: linear-gradient(
+    155deg,
+    rgba(145, 185, 225, 0.5) 0%,
+    rgba(18, 28, 40, 0.96) 13%,
+    rgba(4, 7, 11, 0.99) 44%,
+    rgba(14, 23, 33, 0.96) 82%,
+    rgba(138, 185, 229, 0.42) 100%
+  );
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.9),
+    0 0 0 5px #03060a,
+    0 0 0 6.5px rgba(45, 62, 78, 0.6),
+    0 18px 40px rgba(0, 0, 0, 0.85),
+    0 0 24px color-mix(in srgb, var(--capsule-accent, #f4c75b) 14%, transparent),
+    6px 4px 25px rgba(65, 152, 238, 0.12);
+  transition:
+    border-radius 0.3s,
+    box-shadow 0.3s,
+    filter 0.2s;
+  z-index: 4;
+}
+
+.dyne-studio-root .central-capsule.is-pulse {
+  animation: capsule-confirm-pulse 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes capsule-confirm-pulse {
+  0% {
+    filter: brightness(1);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.9),
+      0 0 0 5px #03060a,
+      0 0 0 6.5px rgba(45, 62, 78, 0.6),
+      0 18px 40px rgba(0, 0, 0, 0.85),
+      0 0 16px color-mix(in srgb, var(--capsule-accent, #f4c75b) 20%, transparent);
+  }
+  50% {
+    filter: brightness(1.22);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.9),
+      0 0 0 5px #03060a,
+      0 0 0 8px color-mix(in srgb, var(--capsule-accent, #f4c75b) 75%, transparent),
+      0 18px 40px rgba(0, 0, 0, 0.85),
+      0 0 38px color-mix(in srgb, var(--capsule-accent, #f4c75b) 60%, transparent),
+      0 0 65px color-mix(in srgb, var(--capsule-accent, #f4c75b) 30%, transparent);
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.9),
+      0 0 0 5px #03060a,
+      0 0 0 6.5px rgba(45, 62, 78, 0.6),
+      0 18px 40px rgba(0, 0, 0, 0.85),
+      0 0 24px color-mix(in srgb, var(--capsule-accent, #f4c75b) 14%, transparent);
+  }
+}
+
+.dyne-studio-root .central-capsule::before {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: inherit;
+  background: linear-gradient(158deg, #1c2734 0%, #080d14 26%, #020407 55%, #091119 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(244, 204, 110, 0.42),
+    inset 0 1.5px 2px rgba(214, 231, 243, 0.35),
+    inset 0 -1.5px 3px rgba(0, 0, 0, 0.7);
+}
+
+.dyne-studio-root .central-capsule:focus-visible {
+  outline: 2px solid #a6d2fa;
+  outline-offset: 12px;
+}
+.dyne-studio-root .central-capsule:hover {
+  filter: brightness(1.12);
+}
+
+.dyne-studio-root .capsule-sheen {
+  position: absolute;
+  inset: 7px;
+  border-radius: inherit;
+  overflow: hidden;
+  opacity: var(--intensity, 0.5);
+  background: linear-gradient(
+    145deg,
+    rgba(166, 200, 229, 0.32) 0%,
+    rgba(139, 189, 229, 0.08) 28%,
+    transparent 32%
+  );
+  transition: opacity 0.25s ease-out;
+}
+
+.dyne-studio-root .capsule-content-clipper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.dyne-studio-root .capsule-content {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  white-space: nowrap;
+}
+
+.dyne-studio-root .activity-mark {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--capsule-accent, #f4c75b) 65%, rgba(132, 184, 232, 0.4));
+  border-radius: 50%;
+  background: rgba(4, 8, 14, 0.75);
+  color: var(--capsule-accent, #f4c75b);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.5);
+  transition:
+    border-color 0.3s,
+    color 0.3s;
+}
+
+.dyne-studio-root .capsule-name {
+  color: #edf2f7;
+  letter-spacing: -0.3px;
+  font-feature-settings:
+    "tnum" 1,
+    "cv02" 1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+
+.dyne-studio-root .capsule-meta-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dyne-studio-root .status-light {
+  width: 8px;
+  height: 8px;
+  background: #f0a83b;
+  border-radius: 50%;
+  box-shadow:
+    0 0 6px #f0a83b,
+    0 0 14px rgba(240, 168, 59, 0.65),
+    inset 0 1px 1px #fff8db;
+}
+
+/* Material computed styles (monotonic differences >= 6/255 at 0%, 50%, 100%) */
+.dyne-studio-root .texture-matte {
+  background: linear-gradient(
+    155deg,
+    rgba(120, 155, 190, calc(0.65 - var(--matte-intensity, 0.5) * 0.55)) 0%,
+    #151d28 15%,
+    #05080c 50%,
+    #0f1722 85%,
+    rgba(95, 125, 160, calc(0.55 - var(--matte-intensity, 0.5) * 0.48)) 100%
+  );
+}
+.dyne-studio-root .texture-matte::before {
+  background: color-mix(in srgb, #243448 calc((1 - var(--matte-intensity, 0.5)) * 75%), #020305);
+  box-shadow:
+    inset 0 0 0 1px rgba(244, 204, 110, calc(0.55 - var(--matte-intensity, 0.5) * 0.48)),
+    inset 0 0 calc(10px + var(--matte-intensity, 0.5) * 45px) #000000;
+}
+.dyne-studio-root .texture-matte .capsule-sheen {
+  background: #506477;
+  opacity: calc((1 - var(--matte-intensity, 0.5)) * 0.38);
+  filter: blur(calc(var(--matte-intensity, 0.5) * 12px));
+}
+
+.dyne-studio-root .texture-glass {
+  border-color: rgba(132, 184, 232, calc(0.15 + var(--glass-intensity, 0.5) * 0.75));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.9),
+    0 0 0 5px #03060a,
+    0 0 0 6.5px rgba(50, 80, 115, calc(0.3 + var(--glass-intensity, 0.5) * 0.65)),
+    0 18px 40px rgba(0, 0, 0, 0.85),
+    0 0 calc(8px + var(--glass-intensity, 0.5) * 45px)
+      color-mix(
+        in srgb,
+        var(--capsule-accent, #f4c75b) calc(10% + var(--glass-intensity, 0.5) * 35%),
+        transparent
+      ),
+    6px 4px 28px rgba(75, 165, 255, calc(0.04 + var(--glass-intensity, 0.5) * 0.45));
+}
+.dyne-studio-root .texture-glass::before {
+  background: linear-gradient(
+    158deg,
+    rgba(45, 80, 125, calc(0.95 - var(--glass-intensity, 0.5) * 0.75)) 0%,
+    rgba(18, 32, 52, calc(0.98 - var(--glass-intensity, 0.5) * 0.7)) 26%,
+    rgba(5, 12, 22, calc(0.98 - var(--glass-intensity, 0.5) * 0.65)) 55%,
+    rgba(25, 45, 75, calc(0.95 - var(--glass-intensity, 0.5) * 0.75)) 100%
+  );
+  box-shadow:
+    inset 0 0 0 1px rgba(244, 204, 110, calc(0.3 + var(--glass-intensity, 0.5) * 0.6)),
+    inset 0 1.5px 2px rgba(214, 231, 243, calc(0.25 + var(--glass-intensity, 0.5) * 0.7)),
+    inset 0 0 calc(6px + var(--glass-intensity, 0.5) * 35px)
+      rgba(150, 215, 255, calc(var(--glass-intensity, 0.5) * 0.55));
+}
+.dyne-studio-root .texture-glass .capsule-sheen {
+  opacity: calc(0.05 + var(--glass-intensity, 0.5) * 0.95);
+  background: linear-gradient(
+    145deg,
+    rgba(205, 238, 255, calc(0.15 + var(--glass-intensity, 0.5) * 0.8)) 0%,
+    rgba(145, 198, 240, calc(0.05 + var(--glass-intensity, 0.5) * 0.4)) 28%,
+    transparent 44%
+  );
+}
+
+.dyne-studio-root .texture-translucent {
+  background: rgba(6, 12, 20, calc(0.88 - var(--translucent-intensity, 0.5) * 0.82));
+  backdrop-filter: blur(calc(3px + var(--translucent-intensity, 0.5) * 25px))
+    saturate(calc(105% + var(--translucent-intensity, 0.5) * 60%));
+  -webkit-backdrop-filter: blur(calc(3px + var(--translucent-intensity, 0.5) * 25px))
+    saturate(calc(105% + var(--translucent-intensity, 0.5) * 60%));
+}
+.dyne-studio-root .texture-translucent::before {
+  background: linear-gradient(
+    155deg,
+    rgba(60, 95, 140, calc(0.9 - var(--translucent-intensity, 0.5) * 0.86)),
+    rgba(6, 14, 24, calc(0.96 - var(--translucent-intensity, 0.5) * 0.92))
+  );
+  opacity: calc(0.95 - var(--translucent-intensity, 0.5) * 0.88);
+  box-shadow:
+    inset 0 0 0 1px rgba(244, 204, 110, calc(0.5 - var(--translucent-intensity, 0.5) * 0.4)),
+    inset 0 1.5px 2px rgba(214, 231, 243, calc(0.35 + var(--translucent-intensity, 0.5) * 0.45));
+}
+.dyne-studio-root .texture-translucent .capsule-sheen {
+  opacity: calc(0.05 + var(--translucent-intensity, 0.5) * 0.85);
+  background: linear-gradient(
+    145deg,
+    rgba(195, 230, 255, calc(0.12 + var(--translucent-intensity, 0.5) * 0.75)) 0%,
+    rgba(130, 185, 235, calc(0.04 + var(--translucent-intensity, 0.5) * 0.4)) 32%,
+    transparent 48%
+  );
+}
+
+/* Lighter, contrasting, softly faded backdrop behind the capsule for Texture mode */
+.dyne-studio-root .texture-preview-backdrop {
+  position: absolute;
+  left: 18%;
+  top: 28%;
+  width: 64%;
+  height: 44%;
+  pointer-events: none;
+  border-radius: 70px;
+  background: radial-gradient(
+    ellipse 65% 55% at 50% 50%,
+    rgba(190, 225, 255, 0.55) 0%,
+    rgba(125, 185, 245, 0.32) 42%,
+    rgba(55, 105, 175, 0.12) 70%,
+    transparent 88%
+  );
+  box-shadow: 0 0 65px 24px rgba(135, 195, 255, 0.28);
+  z-index: 1;
+  animation: texture-backdrop-fade 0.3s ease-out;
+}
+
+@keyframes texture-backdrop-fade {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Style variations */
+.dyne-studio-root .style-quiet {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.9),
+    0 0 0 4px #030609,
+    0 0 0 5.5px #32404e,
+    0 14px 30px rgba(0, 0, 0, 0.8);
+}
+.dyne-studio-root .style-luminous {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.9),
+    -3px 0 8px color-mix(in srgb, var(--capsule-accent, #f4c75b) 75%, transparent),
+    4px 2px 12px #5893bb99,
+    0 0 0 5px #030609,
+    0 0 0 7px #50677c,
+    -7px 4px 35px color-mix(in srgb, var(--capsule-accent, #f4c75b) 25%, transparent),
+    0 18px 40px rgba(0, 0, 0, 0.85);
+}
+
+.dyne-studio-root .capsule-ground {
+  position: absolute;
+  width: 46%;
+  height: 1px;
+  top: 70%;
+  left: 27%;
+  background: linear-gradient(90deg, transparent, #345d7b55, transparent);
+  box-shadow: 0 0 25px 5px #41678b0d;
+}
+
+.dyne-studio-root .stage-instruction {
+  text-align: center;
+  padding-bottom: 15px;
+  margin-top: -10px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+.dyne-studio-root .stage-instruction > span {
+  color: #9abedc;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+.dyne-studio-root .stage-instruction p {
+  color: #889bb0;
+  font-size: 13px;
+  margin-top: 9px;
+}
+
+.dyne-studio-root .stage-bottomline {
+  padding-top: 17px;
+  padding-bottom: 20px;
+  font-size: 12px;
+  color: #8295a8;
+}
+.dyne-studio-root .stage-bottomline > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.dyne-studio-root .small-cross {
+  font-size: 14px;
+  color: #6b839c;
+}
+.dyne-studio-root .keycap {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.dyne-studio-root .studio-footer {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #94a7bd;
+  font-size: 13px;
+  padding: 0 8px;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+.dyne-studio-root .studio-footer > span {
+  letter-spacing: 0.3px;
+}
+.dyne-studio-root .studio-footer > span > span {
+  color: #cad8e6;
+}
+.dyne-studio-root .studio-footer p {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 12px;
+  color: #8699ad;
+}
+
+/* Adjustment tracks */
+.dyne-studio-root .track-svg {
+  touch-action: none;
+  pointer-events: none;
+  overflow: visible;
+}
+.dyne-studio-root .track-svg .track-hit,
+.dyne-studio-root .track-svg .track-handle-hit,
+.dyne-studio-root .track-svg .track-handle,
+.dyne-studio-root .track-svg .track-tick {
+  pointer-events: all;
+}
+.dyne-studio-root .track-handle-hit {
+  cursor: grab;
+}
+.dyne-studio-root .track-handle-hit:active {
+  cursor: grabbing;
+}
+.dyne-studio-root .adjustment-layer {
+  pointer-events: auto;
+}
+.dyne-studio-root .track-handle {
+  transition: none;
+}
+.dyne-studio-root .track-hit {
+  stroke: transparent;
+  stroke-width: 34px;
+  fill: none;
+  pointer-events: stroke;
+  cursor: grab;
+}
+.dyne-studio-root .track-base {
+  stroke: #263341;
+  stroke-width: 3;
+  fill: none;
+}
+.dyne-studio-root .track-active {
+  stroke: #79bcff;
+  stroke-width: 3;
+  fill: none;
+  filter: drop-shadow(0 0 5px #318ddd88);
+}
+.dyne-studio-root .track-tick {
+  cursor: pointer;
+}
+.dyne-studio-root .tick-active {
+  stroke: #96ceff;
+  stroke-width: 1.5;
+}
+.dyne-studio-root .tick-inactive {
+  stroke: #3f4e5e;
+  stroke-width: 1.5;
+}
+.dyne-studio-root .tick-label {
+  font-family: "Courier New", monospace;
+  fill: #a9c2d8;
+  font-size: 13px;
+  pointer-events: none;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+.dyne-studio-root .track-handle {
+  fill: #398fee;
+  stroke: #d8eeff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 7px #4b9fff);
+  cursor: grab;
+  pointer-events: all;
+  outline: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.dyne-studio-root .track-handle:active {
+  cursor: grabbing;
+}
+.dyne-studio-root .track-handle:focus-visible {
+  stroke-width: 4;
+}
+
+.dyne-studio-root .track-svg.is-detent .track-handle {
+  animation: dial-detent-pulse 110ms ease-out;
+}
+.dyne-studio-root .track-svg.is-detent .track-active {
+  animation: dial-track-pulse 110ms ease-out;
+}
+
+/* Custom RGB */
+.dyne-studio-root .colour-exploration {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+.dyne-studio-root .custom-rgb-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  touch-action: none;
+  pointer-events: none;
+  z-index: 0;
+}
+.dyne-studio-root .custom-rgb-svg .rgb-track-hit,
+.dyne-studio-root .custom-rgb-svg .rgb-handle-hit,
+.dyne-studio-root .custom-rgb-svg .rgb-handle,
+.dyne-studio-root .custom-rgb-svg .rgb-handle-group {
+  pointer-events: all;
+}
+.dyne-studio-root .rgb-ring {
+  transition: opacity 0.2s ease-out;
+}
+.dyne-studio-root .rgb-ring:not(.is-active) {
+  opacity: 0.65;
+}
+.dyne-studio-root .rgb-track-base {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.18;
+}
+.dyne-studio-root .rgb-ring.is-active .rgb-track-base {
+  opacity: 0.32;
+}
+.dyne-studio-root .rgb-track-active {
+  fill: none;
+  stroke-width: 3.2;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 3px currentColor);
+  pointer-events: none;
+}
+.dyne-studio-root .rgb-tick {
+  fill: none;
+  stroke-width: 1.4;
+  opacity: 0.24;
+  pointer-events: none;
+}
+.dyne-studio-root .rgb-ring.is-active .rgb-track-active {
+  stroke-width: 4;
+  opacity: 1;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+.dyne-studio-root .rgb-ring.is-active .rgb-tick {
+  opacity: 0.65;
+}
+.dyne-studio-root .rgb-track-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 24;
+  pointer-events: stroke;
+  cursor: crosshair;
+}
+.dyne-studio-root .rgb-handle-hit {
+  fill: transparent;
+  stroke: transparent;
+  cursor: grab;
+}
+.dyne-studio-root .rgb-handle-group {
+  cursor: grab;
+  outline: none;
+}
+.dyne-studio-root .rgb-handle-group:active {
+  cursor: grabbing;
+}
+.dyne-studio-root .rgb-handle-group:focus-visible .rgb-handle-body {
+  stroke-width: 3.5px;
+  filter: drop-shadow(0 0 8px #f4f8ff);
+}
+.dyne-studio-root .rgb-handle-halo {
+  transition: opacity 0.15s ease-out;
+}
+.dyne-studio-root .rgb-handle {
+  stroke-width: 2.5;
+  cursor: grab;
+  outline: none;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.dyne-studio-root .rgb-handle:active {
+  cursor: grabbing;
+}
+.dyne-studio-root .rgb-handle:focus-visible {
+  stroke-width: 4;
+  filter: drop-shadow(0 0 8px #f4f8ff);
+}
+.dyne-studio-root .rgb-handle-badge {
+  pointer-events: none;
+}
+
+.dyne-studio-root .custom-rgb-svg.is-detent .rgb-ring.is-active .rgb-handle-group {
+  animation: dial-detent-pulse 110ms ease-out;
+}
+.dyne-studio-root .custom-rgb-svg.is-detent .rgb-ring.is-active .rgb-handle {
+  animation: dial-detent-pulse 110ms ease-out;
+}
+.dyne-studio-root .custom-rgb-svg.is-detent .rgb-ring.is-active .rgb-track-active {
+  animation: dial-track-pulse 110ms ease-out;
+}
+
+/* Readout pill text >= 12px */
+.dyne-studio-root .rgb-readout {
+  position: absolute;
+  top: 1%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 7px 16px;
+  border: 1px solid rgba(132, 184, 232, 0.28);
+  border-radius: 14px;
+  background: rgba(4, 9, 16, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: #b8cce0;
+  text-align: center;
+  font:
+    12px "Courier New",
+    monospace;
+  letter-spacing: 0.4px;
+  pointer-events: auto;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.dyne-studio-root .rgb-fields {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.dyne-studio-root .rgb-fields label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: var(--channel-accent);
+  font-size: 12px;
+}
+.dyne-studio-root .rgb-fields label.is-active {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--channel-accent) 45%, transparent);
+}
+.dyne-studio-root .rgb-fields input {
+  width: 44px;
+  border: 1px solid #294054;
+  border-radius: 6px;
+  background: #03070c;
+  color: #e4eef8;
+  padding: 4px 3px;
+  text-align: center;
+  font:
+    12px "Courier New",
+    monospace;
+  outline: none;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.dyne-studio-root .rgb-fields input::-webkit-outer-spin-button,
+.dyne-studio-root .rgb-fields input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.dyne-studio-root .rgb-fields input:focus {
+  border-color: var(--channel-accent);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--channel-accent) 40%, transparent);
+}
+.dyne-studio-root .rgb-hex {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 10px;
+  border-left: 1px solid #2a3948;
+  color: #829bb2;
+  font-size: 12px;
+}
+.dyne-studio-root .rgb-hex strong {
+  color: #e4eef8;
+  font-size: 12px;
+  font-weight: 500;
+}
+.dyne-studio-root .rgb-hex i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 7px currentColor;
+}
+
+.dyne-studio-root .colour-exploration.is-dragging,
+.dyne-studio-root .colour-exploration.is-dragging * {
+  cursor: grabbing;
+}
+.dyne-studio-root .colour-exploration.is-dragging .rgb-handle-group,
+.dyne-studio-root .colour-exploration.is-dragging .rgb-handle-body,
+.dyne-studio-root .colour-exploration.is-dragging .rgb-handle-halo,
+.dyne-studio-root .colour-exploration.is-dragging .rgb-track-active,
+.dyne-studio-root .colour-exploration.is-dragging .rgb-handle-badge,
+.dyne-studio-root .colour-exploration.is-dragging .rgb-ring {
+  transition: none;
+  animation: none;
+  transition-duration: 0s;
+}
+
+@keyframes dial-detent-pulse {
+  0% {
+    filter: brightness(1);
+  }
+  45% {
+    filter: brightness(1.25);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+@keyframes dial-track-pulse {
+  0% {
+    opacity: 0.8;
+  }
+  45% {
+    opacity: 1;
+    stroke-width: 4.2;
+  }
+  100% {
+    opacity: 0.88;
+    stroke-width: 3;
+  }
+}
+
+.dyne-studio-root .adjustment-header {
+  position: absolute;
+  top: 1%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 165px;
+  background: rgba(5, 12, 22, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(132, 184, 232, 0.32);
+  border-radius: 20px;
+  padding: 9px 20px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.72),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.dyne-studio-root .adjustment-header > span {
+  font-size: 13px;
+  color: #d6e5f4;
+}
+.dyne-studio-root .adjustment-header strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 17px;
+  font-family: "Courier New", monospace;
+  font-weight: 400;
+  color: #94c7ef;
+}
+.dyne-studio-root .adjustment-header small {
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+/* Capsule Switcher Navigation Arrows */
+.dyne-studio-root .capsule-nav-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(132, 184, 232, 0.22);
+  background: rgba(12, 20, 30, 0.55);
+  color: #8fa8c4;
+  cursor: pointer;
+  z-index: 10;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.dyne-studio-root .capsule-nav-arrow:hover {
+  background: rgba(22, 36, 54, 0.85);
+  border-color: rgba(140, 205, 255, 0.65);
+  color: #edf6ff;
+  box-shadow: 0 0 12px rgba(100, 180, 255, 0.25);
+}
+
+.dyne-studio-root .capsule-nav-arrow:focus-visible {
+  outline: 2px solid #79bcff;
+  outline-offset: 3px;
+  background: rgba(22, 36, 54, 0.95);
+  color: #ffffff;
+}
+
+.dyne-studio-root .capsule-nav-prev {
+  left: 14px;
+}
+
+.dyne-studio-root .capsule-nav-next {
+  right: 14px;
+}
+
+/* Capsule Dots Indicator & Preview Badge */
+.dyne-studio-root .capsule-switcher-indicator {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.dyne-studio-root .capsule-dots-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dyne-studio-root .capsule-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(132, 184, 232, 0.35);
+  background: rgba(18, 28, 40, 0.6);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    width 0.25s ease,
+    background-color 0.25s ease,
+    border-radius 0.25s ease,
+    border-color 0.25s ease;
+}
+
+.dyne-studio-root .capsule-dot:hover {
+  border-color: rgba(160, 215, 255, 0.7);
+  background: rgba(40, 65, 95, 0.8);
+}
+
+.dyne-studio-root .capsule-dot.is-active {
+  width: 22px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--capsule-accent, #79bcff) 85%, #ffffff);
+  border-color: #ffffff;
+  box-shadow: 0 0 8px var(--capsule-accent, #79bcff);
+}
+
+.dyne-studio-root .capsule-dot:focus-visible {
+  outline: 2px solid #79bcff;
+  outline-offset: 3px;
+}
+
+.dyne-studio-root .capsule-preview-badge {
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  color: #7d96b0;
+  letter-spacing: 0.3px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(15, 25, 36, 0.6);
+  border: 1px solid rgba(132, 184, 232, 0.2);
+  text-transform: uppercase;
+}
+
+/* Responsive adjustments */
+@media (min-width: 1360px) and (min-height: 840px) {
+  .dyne-studio-root .capsule-assembly {
+    width: min(940px, 94%);
+  }
+}
+@media (min-width: 1800px) and (min-height: 980px) {
+  .dyne-studio-root .capsule-assembly {
+    width: min(960px, 94%);
+  }
+}
+@media (min-height: 900px) {
+  .dyne-studio-root .studio {
+    padding-top: 36px;
+  }
+  .dyne-studio-root .capsule-stage {
+    min-height: 600px;
+  }
+}
+@media (max-height: 820px) and (min-width: 850px) {
+  .dyne-studio-root .studio {
+    padding-top: 20px;
+  }
+  .dyne-studio-root .studio-header {
+    padding-bottom: 20px;
+  }
+  .dyne-studio-root .capsule-stage {
+    min-height: 520px;
+  }
+  .dyne-studio-root .capsule-assembly {
+    max-width: 740px;
+  }
+  .dyne-studio-root .stage-heading {
+    padding-top: 0;
+  }
+}
+@container (max-width: 760px) {
+  .dyne-studio-root .capsule-content {
+    gap: 2.7cqw;
+  }
+  .dyne-studio-root .activity-mark {
+    width: 4.9cqw;
+    height: 4.9cqw;
+  }
+  .dyne-studio-root .activity-mark svg {
+    width: 2.8cqw;
+    height: 2.8cqw;
+  }
+  .dyne-studio-root .status-light {
+    width: 1.05cqw;
+    height: 1.05cqw;
+  }
+  .dyne-studio-root .adjustment-header {
+    min-width: 130px;
+    padding: 6px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dyne-studio-root *,
+  .dyne-studio-root *::before,
+  .dyne-studio-root *::after {
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
+.dyne-studio-root .dyne-host-controls {
+  display: grid;
+  gap: 12px;
+  margin: 16px auto 0;
+  width: min(100%, 620px);
+  padding: 14px 18px;
+  border: 1px solid #263443;
+  border-radius: 14px;
+  background: rgba(10, 16, 24, 0.88);
+  color: #dce8f4;
+  font-size: 12px;
+}
+.dyne-studio-root .dyne-host-controls label {
+  display: grid;
+  gap: 8px;
+}
+.dyne-studio-root .dyne-host-controls input[type="range"] {
+  width: 100%;
+  accent-color: #48d8e8;
+}
+.dyne-studio-root .dyne-host-controls input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.dyne-studio-root .dyne-host-controls [role="status"] {
+  margin: 0;
+  color: #e9bd69;
+}
+
+.dyne-studio-root .central-capsule .capsule-preview-on-capsule {
+  position: absolute;
+  top: -12px;
+  right: 18px;
+  z-index: 10;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-weight: 600;
+  color: #a4c2e0;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(10, 18, 28, 0.92);
+  border: 1px solid rgba(132, 184, 232, 0.35);
+  text-transform: uppercase;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+/* Unobtrusive switcher controls at rest: revealed on hover or focus */
+.dyne-studio-root .unobtrusive-at-rest {
+  opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dyne-studio-root .capsule-stage:hover .unobtrusive-at-rest,
+.dyne-studio-root .capsule-stage:focus-within .unobtrusive-at-rest {
+  opacity: 1;
+}
+
+.dyne-studio-root .capsule-switcher-arrows {
+  pointer-events: none;
+}
+
+.dyne-studio-root .capsule-switcher-arrows .capsule-nav-arrow {
+  pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+  .dyne-studio-root .studio {
+    padding: 8px;
+    min-height: auto;
+  }
+  .dyne-studio-root .capsule-stage {
+    min-height: 340px;
+  }
+  .dyne-studio-root .capsule-stage.is-resting {
+    min-height: 280px;
+  }
+  .dyne-studio-root .capsule-assembly {
+    width: 95%;
+    min-height: 260px;
+  }
+  .dyne-studio-root .central-capsule {
+    left: 8%;
+    width: 84%;
+    top: 32%;
+    height: 36%;
+    min-height: 52px;
+    --capsule-font-size: 14px;
+    padding: 4px 8px;
+  }
+  .dyne-studio-root .central-capsule .capsule-content {
+    gap: 8px;
+  }
+  .dyne-studio-root .central-capsule .activity-mark {
+    width: 28px;
+    height: 28px;
+  }
+  .dyne-studio-root .central-capsule .activity-mark svg {
+    width: 16px;
+    height: 16px;
+  }
+  .dyne-studio-root .central-capsule .capsule-preview-on-capsule {
+    top: -10px;
+    right: 12px;
+    font-size: 9.5px;
+    padding: 1px 6px;
+  }
+}

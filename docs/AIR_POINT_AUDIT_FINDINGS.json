@@ -1,0 +1,196 @@
+{
+  "audit_version": "1.0.0",
+  "audit_date": "2026-10-19",
+  "overall_readiness_score": 88,
+  "readiness_verdict": "Production-grade core architecture with localized test isolation, CSRF hardening, and edge-case watchdog requirements prior to public release.",
+  "repositories_audited": {
+    "python_engine": {
+      "path": "C:\\Users\\loges\\Documents\\antigravity\\air_point_clean",
+      "test_results": {
+        "total": 224,
+        "passed": 224,
+        "failed": 0,
+        "status": "All 224 tests passing across full test suite"
+      }
+    },
+    "react_control_center": {
+      "path": "C:\\Users\\loges\\Downloads\\Air_Point_Control_Center_Refined",
+      "test_results": {
+        "total": 48,
+        "passed": 48,
+        "failed": 0
+      },
+      "typescript_errors": 0,
+      "build_status": "Passed"
+    }
+  },
+  "subsystem_scores": {
+    "computer_vision_tracking": 92,
+    "gesture_recognition_engine": 90,
+    "input_actuation_safety": 86,
+    "http_sse_bridge": 82,
+    "frontend_architecture_ui": 95,
+    "test_suite_coverage": 85,
+    "security_isolation": 78
+  },
+  "gesture_verification_matrix": [
+    {
+      "id": "pointer",
+      "name": "Pointer Move & Click",
+      "hand": "Right (Primary) / Left (Takeover)",
+      "trigger": "Index extended, thumb pinch for click",
+      "windows_action": "SendInput MOUSEEVENTF_MOVE, MOUSEEVENTF_LEFTDOWN/UP",
+      "status": "Verified via Tests & Code Review",
+      "notes": "1€ Filter smoothing, jump detection threshold (380px/24000*dt), spatial lock on pinch"
+    },
+    {
+      "id": "drag",
+      "name": "Drag & Drop",
+      "hand": "Left Hand Pinch (Hold)",
+      "trigger": "Left index & thumb pinch below 0.60 palm width",
+      "windows_action": "SendInput MOUSEEVENTF_LEFTDOWN held until release",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Two-hand coordination: left hand holds drag while right hand steers pointer. Requires watchdog timeout on sudden tracking loss."
+    },
+    {
+      "id": "screenshot",
+      "name": "Screenshot Capture",
+      "hand": "Dual Open Palms",
+      "trigger": "Both open palms facing camera held for hold_duration (default 3.0s)",
+      "windows_action": "PIL.ImageGrab to PNG in screenshots/",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Full-screen capture with cursor hide/restore callback; rate-limited with re-arm requirement."
+    },
+    {
+      "id": "whatsapp",
+      "name": "Launch WhatsApp Desktop",
+      "hand": "Dual Hand 'W' Pose",
+      "trigger": "Index fingers touching, pinkies up, middle/ring curled for 0.7s",
+      "windows_action": "AppLauncher subprocess / URI protocol launch",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Single-fire latching state machine, cooldown re-arm prevents repeated launches."
+    },
+    {
+      "id": "mute",
+      "name": "Audio Mute / Unmute",
+      "hand": "Single Hand (Left or Right)",
+      "trigger": "Index tip touching lips for 0.6s",
+      "windows_action": "AudioController pycaw / Win32 master mute toggle",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Single-fire action, requires finger release (>0.25s) before re-arming. Integrated GIF tutorial in UI."
+    },
+    {
+      "id": "volume-up",
+      "name": "Continuous Volume Up",
+      "hand": "Right Hand (or Left to Right Ear)",
+      "trigger": "Index tip touching right ear anchor (#234) for 0.3s dwell",
+      "windows_action": "AudioController continuous scalar adjustment (+30%/s)",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Candidate proximity never locks cursor; only confirmed contact adjusts volume."
+    },
+    {
+      "id": "volume-down",
+      "name": "Continuous Volume Down",
+      "hand": "Left Hand (or Right to Left Ear)",
+      "trigger": "Index tip touching left ear anchor (#454) for 0.3s dwell",
+      "windows_action": "AudioController continuous scalar adjustment (-30%/s)",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Candidate proximity never locks cursor; monotonic time-delta volume step."
+    },
+    {
+      "id": "wakanda-forever",
+      "name": "Crossed-Arm Workstation Lock",
+      "hand": "Dual Forearms Crossed with Fists",
+      "trigger": "Forearms crossed across chest forming 'X' with closed fists held 2.0s",
+      "windows_action": "ctypes.windll.user32.LockWorkStation()",
+      "status": "Verified via Tests & Code Review",
+      "notes": "Guarded by AIRPOINT_DISABLE_REAL_LOCK env var; disabled by default for safety; 2s cooldown."
+    }
+  ],
+  "defects": [
+    {
+      "id": "TEST/CONF-001",
+      "priority": "P1",
+      "category": "Test Automation / Configuration Isolation",
+      "status": "Remediated",
+      "component": "core/control_server.py:RuntimeState",
+      "title": "Unit test pollution from persistent on-disk settings.json",
+      "root_cause": "RuntimeState.__init__ unconditionally loads settings.json from project root, coupling test suite outcomes to user runtime settings.",
+      "impact": "test_wakanda_gesture fails when settings.json has 'wakanda-forever': true on developer machines.",
+      "remediation": "Add dependency injection for settings_path or support AIRPOINT_SETTINGS_PATH override; test runner defaults to isolated in-memory or fixture settings. Verified passing 224/224 tests."
+    },
+    {
+      "id": "SEC/BRG-001",
+      "priority": "P1",
+      "category": "Security / Network Bridge",
+      "status": "Remediated",
+      "component": "core/control_server.py:ControlRequestHandler",
+      "title": "Unauthenticated local HTTP bridge and broad localhost origin acceptance",
+      "root_cause": "ControlRequestHandler allows requests from any localhost/127.0.0.1 port without an authentication secret or CSRF token, and allows requests with missing Origin headers.",
+      "impact": "Malicious webpages running in any browser on localhost can trigger /api/toggle or change gesture settings.",
+      "remediation": "Issue ephemeral 32-byte session token on startup, write to .bridge_token and bridge_info.json, enforce strict Origin whitelist and require X-AirPoint-Token header on mutating endpoints."
+    },
+    {
+      "id": "ACT/SAFE-001",
+      "priority": "P1",
+      "category": "Input Actuation / Desktop Safety",
+      "status": "Remediated",
+      "component": "core/gestures/orchestrator.py & core/actuator.py",
+      "title": "Potential stuck left mouse down on abrupt tracking loss during drag",
+      "root_cause": "If tracking drops abruptly while is_dragging == True, drag_end() is only called on engine pause or left hand state transition; frame loss may leave mouse button down.",
+      "impact": "Windows cursor remains locked in dragging mode on the user's desktop until hand is re-acquired.",
+      "remediation": "Implemented actuator watchdog check_drag_watchdog that releases left mouse button if is_dragging is True without keep-alive touch for > 0.25s, and guaranteed immediate release on process(None) and reset()."
+    },
+    {
+      "id": "NET/PRT-001",
+      "priority": "P2",
+      "category": "Networking / Discovery",
+      "status": "Remediated",
+      "component": "core/control_server.py:ControlServer",
+      "title": "Silent fallback to ephemeral port breaks frontend connectivity",
+      "root_cause": "When port 8765 is occupied, ControlServer binds to port 0 (ephemeral), but the frontend hardcodes 8765 without a discovery mechanism.",
+      "impact": "User sees permanent 'Engine offline' in Control Center with no error message explaining port collision.",
+      "remediation": "Fail deterministically with actionable diagnostic RuntimeError on occupied port with clear guidance to resolve PID conflict; write active port and token to bridge_info.json and .bridge_token on startup."
+    },
+    {
+      "id": "CV/EAR-001",
+      "priority": "P2",
+      "category": "Computer Vision / Occlusion",
+      "component": "core/gestures/ear_volume_gesture.py & core/gestures/lip_mute_gesture.py",
+      "title": "Hand self-occlusion degrades FaceMesh confidence during ear/lip touch",
+      "root_cause": "Hand approaching ear (#234, #454) or lips (#13, #14) obscures face contour, causing FaceMesh confidence to drop below threshold.",
+      "impact": "Intermittent frame drops during ear contact or lip touch can prematurely reset hold timers.",
+      "remediation": "Introduce temporal landmark smoothing and a 0.35s face anchor memory buffer when hand is detected within proximity threshold."
+    },
+    {
+      "id": "PERF/CAM-001",
+      "priority": "P2",
+      "category": "Performance / Video Pipeline",
+      "component": "main.py & core/control_server.py:get_latest_jpeg",
+      "title": "Redundant JPEG encoding and frame copies in HTTP MJPEG camera streaming",
+      "root_cause": "Frames are resized and re-encoded to JPEG inside the streaming generator loop for every active client instead of once globally.",
+      "impact": "Increases CPU utilization and can throttle tracking loop FPS on low-power devices.",
+      "remediation": "Cache the latest JPEG frame globally with a timestamp or frame-id check so multiple consumers share one encoded buffer."
+    },
+    {
+      "id": "UI/SSE-001",
+      "priority": "P3",
+      "category": "Frontend / Network",
+      "component": "src/components/air-point/engine.tsx",
+      "title": "Unbounded EventSource reconnect loop when Python bridge is offline",
+      "root_cause": "Native EventSource reconnects continuously every 3s even when /api/status confirms bridge is offline.",
+      "impact": "Noisy browser console error logs during standalone frontend development or when engine is stopped.",
+      "remediation": "Only initialize EventSource once connected === true is established by status heartbeat."
+    },
+    {
+      "id": "SYS/ACC-001",
+      "priority": "P3",
+      "category": "Windows Integration",
+      "component": "main.py:disable_mouse_acceleration",
+      "title": "Windows mouse acceleration remains disabled if engine is terminated via SIGKILL",
+      "root_cause": "SPI_SETMOUSE acceleration bypass relies on graceful exit handlers (finally / atexit); force kill bypasses restoration.",
+      "impact": "User's pointer speed feel altered after sudden crash or Task Manager kill.",
+      "remediation": "Provide restore_mouse.bat script and document restoration procedure."
+    }
+  ]
+}

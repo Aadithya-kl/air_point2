@@ -1,0 +1,27 @@
+﻿AIR_POINT_AUDIT_FINDINGS.json
+AIR_POINT_MASTER_ENGINEERING_AUDIT.md
+AIR_POINT_PHASE1_REMEDIATION_REPORT.md
+BRIDGE_CONTRACT_VERIFICATION.md
+CANDIDATE_VALIDATION_REPORT.md
+SAFE_INTEGRATION_PLAN.md
+UI_UX_AUDIT_FOR_GEMINI_ARGON.md
+core/actuator.py.bak
+core/click_diagnostics.py
+core/control_server.py
+core/control_server.py.bak
+core/gestures/left_hand.py.bak
+core/gestures/orchestrator.py.bak
+core/gestures/wakanda_gesture.py
+docs/from threading import Thread.py
+test_control_server.py
+test_control_server.py.bak
+test_drag_safety.py
+test_phase4_1_control_server.py
+test_phase4_1_dynamic_island.py
+test_phase4_2_cursor_calibration.py
+test_phase4_2_stability_hotfix.py
+test_phase4_3_cursor_movement.py
+test_phase4_4_camera_overlay_and_sensitivity.py
+test_phase4_5_hand_visuals_and_pinch_lock.py
+test_wakanda_gesture.py
+test_wakanda_gesture.py.bak
