@@ -1,0 +1,35 @@
+{
+  "test_verdict": "PASS",
+  "started_in_power_save": true,
+  "wake_confirmed": true,
+  "wake_confirmed_elapsed_s": 22.347,
+  "wake_confirmed_frame_id": 292,
+  "resumed_full_rate_on_next_frame": true,
+  "total_duration_s": 30.89,
+  "pre_wake_probe_frames": 98,
+  "pre_wake_skip_frames": 188,
+  "pre_wake_probe_effective_fps": 4.39,
+  "post_wake_normal_frames": 117,
+  "post_wake_normal_fps": 13.7,
+  "max_measured_velocity": 1123.51,
+  "wake_candidates_armed": 4,
+  "wake_candidates_rejected": 3,
+  "audit_counters": {
+    "whatsapp_attempts": 0,
+    "wakanda_attempts": 0,
+    "audio_adjustments": 0,
+    "audio_mutes": 0,
+    "screenshots_taken": 0,
+    "watchdog_stall_breaks": 0,
+    "invalid_gap_resets": 69,
+    "wake_candidates_armed": 4,
+    "wake_candidates_rejected": 3,
+    "wake_confirmed_events": 1
+  },
+  "actuator_counters": {
+    "moves": 0,
+    "move_tos": 0,
+    "clicks": 0,
+    "drag_starts": 0
+  }
+}

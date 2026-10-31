@@ -1,0 +1,44 @@
+{
+  "run_index": 1,
+  "normal": {
+    "duration_s": 180.78,
+    "avg_cpu_percent": 31.13,
+    "avg_rss_mb": 206.61,
+    "avg_private_mb": 717.8,
+    "hand_inferences": 4284,
+    "face_inferences": 1429,
+    "effective_hand_fps": 23.7,
+    "effective_face_fps": 7.9
+  },
+  "power_save": {
+    "duration_s": 129.25,
+    "avg_cpu_percent": 14.07,
+    "avg_rss_mb": 208.88,
+    "avg_private_mb": 718.44,
+    "hand_inferences": 1288,
+    "face_inferences": 0,
+    "skip_frames": 2578,
+    "effective_probe_fps": 9.97
+  },
+  "deltas": {
+    "cpu_reduction_pct_points": 17.06,
+    "cpu_relative_reduction_pct": 54.81,
+    "rss_mb_delta": -2.28,
+    "workload_aligned_with_production": true
+  },
+  "audit_counters": {
+    "whatsapp_attempts": 0,
+    "wakanda_attempts": 0,
+    "audio_adjustments": 0,
+    "audio_mutes": 0,
+    "screenshots_taken": 0,
+    "invalid_gap_resets": 237,
+    "watchdog_stall_breaks": 0
+  },
+  "actuator_counters": {
+    "moves": 0,
+    "move_tos": 0,
+    "clicks": 0,
+    "drag_starts": 0
+  }
+}

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.idea/
+.vscode/
+*.log
+.env
+.DS_Store
+screenshots/
+backup_*/
+settings.json
+bridge_info.json
+.bridge_token
