@@ -55,6 +55,9 @@ class TestDragSafety(unittest.TestCase):
         config.PINCH_CLICK_ENABLED = True
         config.LEFT_DRAG_ENABLED = True
         config.CAMERA_FPS = 30
+        # Remember the configured value so tearDown restores the real default
+        # instead of pinning the pre-P0 0.075 s for every later test module.
+        self._orig_lost_timeout = config.LEFT_DRAG_LOST_TIMEOUT_S
         config.LEFT_DRAG_LOST_TIMEOUT_S = 0.25
 
         self.actuator = MockMouseActuator()
@@ -66,7 +69,7 @@ class TestDragSafety(unittest.TestCase):
         self.orchestrator._left.drag_lost_timeout_s = 0.25
 
     def tearDown(self):
-        config.LEFT_DRAG_LOST_TIMEOUT_S = 0.075
+        config.LEFT_DRAG_LOST_TIMEOUT_S = self._orig_lost_timeout
 
     def _create_drag_hands(self, is_pinching: bool = True):
         hands = HandsResult()

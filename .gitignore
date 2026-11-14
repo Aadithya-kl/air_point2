@@ -29,3 +29,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# Unified launcher runtime state (PID record, service logs)
+.airpoint/
+logs/
+scripts/.airpoint_pids.json

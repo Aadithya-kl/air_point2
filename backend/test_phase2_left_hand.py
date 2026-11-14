@@ -100,6 +100,9 @@ class TestPhase2LeftHand(unittest.TestCase):
         config.LEFT_DRAG_START_NORM_DIST = 0.55
         config.LEFT_DRAG_RELEASE_NORM_DIST = 0.75
         config.LEFT_DRAG_CONFIRM_S = 0.10
+        # This suite exercises the short 0.075 s dropout grace; restore whatever
+        # the real configuration was afterwards (0.150 s since P0).
+        self._orig_lost_timeout = config.LEFT_DRAG_LOST_TIMEOUT_S
         config.LEFT_DRAG_LOST_TIMEOUT_S = 0.075
 
         self.actuator = DummyActuator()
@@ -109,7 +112,7 @@ class TestPhase2LeftHand(unittest.TestCase):
         self.processor = LeftHandProcessor(self.actuator, self.desktop, self.trackpad)
 
     def tearDown(self) -> None:
-        config.LEFT_DRAG_LOST_TIMEOUT_S = 0.075
+        config.LEFT_DRAG_LOST_TIMEOUT_S = self._orig_lost_timeout
 
     def _make_left_hand(
         self,
@@ -294,7 +297,9 @@ class TestPhase2LeftHand(unittest.TestCase):
         self.processor.process(self._make_left_hand(pinch_norm=0.40))
         self.assertEqual(self.actuator.drags, 1)
 
-        # Clear deliberate unpinch (0.90 >= 0.85)
+        # Clear deliberate unpinch (0.90 >= 0.85): enters RELEASE_PENDING, then satisfies release dwell (0.080s)
+        self.processor.process(self._make_left_hand(pinch_norm=0.90))
+        time.sleep(0.09)
         self.processor.process(self._make_left_hand(pinch_norm=0.90))
         self.assertEqual(self.actuator.drops, 1)
         self.assertFalse(self.actuator.is_dragging)
@@ -312,7 +317,9 @@ class TestPhase2LeftHand(unittest.TestCase):
         self.processor.process(self._make_left_hand(pinch_norm=0.40))
         self.assertEqual(self.actuator.drags, 1)
 
-        # Drop
+        # Drop: enters RELEASE_PENDING, then satisfies release dwell (0.080s)
+        self.processor.process(self._make_left_hand(pinch_norm=0.90))
+        time.sleep(0.09)
         self.processor.process(self._make_left_hand(pinch_norm=0.90))
         self.assertEqual(self.actuator.drops, 1)
         self.assertFalse(self.actuator.is_dragging)
@@ -361,8 +368,10 @@ class TestPhase2LeftHand(unittest.TestCase):
         self.processor.process(self._make_left_hand(pinch_norm=0.40))
         self.assertTrue(self.actuator.is_dragging)
 
-        # Force button-up failure
+        # Force button-up failure: enter RELEASE_PENDING, then satisfy dwell so _execute_drop runs
         self.actuator.fail_up = True
+        self.processor.process(self._make_left_hand(pinch_norm=0.90))
+        time.sleep(0.09)
         self.processor.process(self._make_left_hand(pinch_norm=0.90))
         self.assertEqual(self.processor.left_drag_state, DragLockState.INPUT_ERROR)
         self.assertEqual(self.processor.release_reason, "INPUT_ERROR")

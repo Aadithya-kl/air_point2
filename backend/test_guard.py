@@ -8,6 +8,7 @@ Raises BlockedOSActionError if any protected native API is called.
 
 import sys
 import os
+import importlib
 import subprocess
 import ctypes
 from typing import Any
@@ -172,8 +173,16 @@ def install_test_guard() -> None:
     _ORIGINAL_APIS["WinDLL"] = orig_windll
     ctypes.WinDLL = _guarded_windll
 
-    # 2. Patch pynput controllers
+    # 2. Patch pynput controllers.
+    # Import the submodules explicitly: `import pynput` alone does not load
+    # pynput.mouse / pynput.keyboard, and relying on hasattr() made the
+    # protection depend on whether some earlier import had loaded them.
     if pynput is not None:
+        try:
+            importlib.import_module("pynput.mouse")
+            importlib.import_module("pynput.keyboard")
+        except Exception:
+            pass
         if hasattr(pynput, "mouse"):
             _ORIGINAL_APIS["pynput_mouse_Controller"] = pynput.mouse.Controller
             pynput.mouse.Controller = _BlockedMouseController

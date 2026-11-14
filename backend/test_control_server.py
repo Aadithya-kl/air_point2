@@ -266,12 +266,13 @@ class TestControlServer(unittest.TestCase):
         initial_disk_mtime = os.path.getmtime(SETTINGS_FILE) if os.path.exists(SETTINGS_FILE) else None
         state = RuntimeState(settings_path=None)
 
-        # Default for wakanda-forever must be False regardless of what is in settings.json
-        self.assertFalse(state.enabled_gestures["wakanda-forever"])
+        # In-memory default is True for every gesture (Wakanda Forever included)
+        # regardless of what is in settings.json, which is never read here.
+        self.assertTrue(state.enabled_gestures["wakanda-forever"])
 
         # Mutate in-memory state
-        state.apply_settings({"enabled": {"wakanda-forever": True}, "sensitivity": 2.5})
-        self.assertTrue(state.enabled_gestures["wakanda-forever"])
+        state.apply_settings({"enabled": {"wakanda-forever": False}, "sensitivity": 2.5})
+        self.assertFalse(state.enabled_gestures["wakanda-forever"])
         self.assertEqual(state.sensitivity, 2.5)
 
         # Confirm on-disk file was not modified
@@ -315,7 +316,7 @@ class TestControlServer(unittest.TestCase):
             os.environ["AIRPOINT_SETTINGS_PATH"] = ":memory:"
             state = RuntimeState()
             self.assertIsNone(state.settings_path)
-            self.assertFalse(state.enabled_gestures["wakanda-forever"])
+            self.assertTrue(state.enabled_gestures["wakanda-forever"])
         finally:
             if old_env is None:
                 os.environ.pop("AIRPOINT_SETTINGS_PATH", None)

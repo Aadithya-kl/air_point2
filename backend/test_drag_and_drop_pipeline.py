@@ -218,15 +218,24 @@ class TestDragAndDropPipeline(unittest.TestCase):
         self._step(h_drag, t)
         self.assertTrue(self.actuator.is_dragging)
 
-        # Unpinch: open palm
+        # Unpinch: open palm → enters RELEASE_PENDING (debounce, not immediate drop)
         t += 0.033
         h_open = HandsResult(left=self._make_left_hand(0.40, 0.40, open_palm=True))
         self._step(h_open, t)
-        self.assertEqual(self.actuator.up_events, 1)
-        self.assertFalse(self.actuator.is_dragging)
-        self.assertEqual(self.orchestrator._left.drag_state, LeftDragState.RELEASING)
+        self.assertEqual(self.orchestrator._left.drag_state, LeftDragState.RELEASE_PENDING)
+        self.assertEqual(self.actuator.up_events, 0, "No UP before release dwell completes")
+        self.assertTrue(self.actuator.is_dragging, "Drag still active during release debounce")
 
-        # Stay open
+        # Stay open past release_dwell_s (80ms) → deliberate unpinch completes
+        for _ in range(4):
+            t += 0.033
+            self._step(h_open, t)
+
+        self.assertEqual(self.actuator.up_events, 1, "Exactly one mouse-up after deliberate unpinch")
+        self.assertFalse(self.actuator.is_dragging)
+        self.assertEqual(self.orchestrator._left.drag_state, LeftDragState.READY)
+
+        # Stay open: no duplicate UP events
         for _ in range(5):
             t += 0.033
             self._step(h_open, t)

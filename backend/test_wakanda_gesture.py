@@ -102,16 +102,32 @@ class TestWakandaGesture(unittest.TestCase):
     def setUp(self):
         self.mock_lock = MagicMock(return_value=True)
 
-    def test_wakanda_disabled_by_default(self):
-        """Wakanda Forever must be disabled by default for safety."""
+    def test_wakanda_enabled_by_default_and_disabled_when_configured(self):
+        """
+        Wakanda Forever is available in normal runtime (config.WAKANDA_ENABLED = True)
+        and can be disabled explicitly, by constructor argument or by the runtime
+        toggle the Control Center uses. It originally shipped disabled "for
+        security", which meant the feature never ran at all; safety now comes from
+        the 2.0 s hold, the cooldown/release rule and the test-time lock safeguards.
+        """
+        import config
+        self.assertTrue(config.WAKANDA_ENABLED)
         recognizer = WakandaGestureRecognizer(lock_fn=self.mock_lock)
-        self.assertFalse(recognizer.enabled)
-        self.assertEqual(recognizer.state, WakandaState.DISABLED)
+        self.assertTrue(recognizer.enabled)
+        self.assertEqual(recognizer.state, WakandaState.IDLE)
 
-        # Feeding valid crossed hands when disabled returns False and does not activate
+        # Explicitly disabled instance: valid crossed hands never activate it
+        disabled = WakandaGestureRecognizer(lock_fn=self.mock_lock, enabled=False)
+        self.assertFalse(disabled.enabled)
+        self.assertEqual(disabled.state, WakandaState.DISABLED)
         crossed = create_crossed_arms_hands()
-        active = recognizer.process(crossed, now=10.0)
-        self.assertFalse(active)
+        self.assertFalse(disabled.process(crossed, now=10.0))
+        self.assertEqual(disabled.state, WakandaState.DISABLED)
+        self.mock_lock.assert_not_called()
+
+        # Runtime toggle off (what the Control Center "Lock Screen" setting does)
+        recognizer.enabled = False
+        self.assertFalse(recognizer.process(crossed, now=11.0))
         self.assertEqual(recognizer.state, WakandaState.DISABLED)
         self.mock_lock.assert_not_called()
 
@@ -260,24 +276,24 @@ class TestWakandaGesture(unittest.TestCase):
         self.assertEqual(orch.pointer_owner, PointerOwner.NONE.name)
 
     def test_control_server_setting_synchronization(self):
-        """Verify 'wakanda-forever' setting defaults to False and synchronizes via ControlServer."""
+        """Verify 'wakanda-forever' defaults to True in RuntimeState and toggles both ways via apply_settings."""
         from core.control_server import RuntimeState, SUPPORTED_GESTURES
 
         self.assertIn("wakanda-forever", SUPPORTED_GESTURES)
         # Use isolated in-memory state so real user settings on disk do not pollute the test
         state = RuntimeState(settings_path=None)
         self.assertIn("wakanda-forever", state.enabled_gestures)
-        self.assertFalse(state.enabled_gestures["wakanda-forever"])
-
-        # Enable via apply_settings
-        snapshot = state.apply_settings({"enabled": {"wakanda-forever": True}})
-        self.assertTrue(snapshot["enabled"]["wakanda-forever"])
         self.assertTrue(state.enabled_gestures["wakanda-forever"])
 
-        # Disable again
+        # Disable via apply_settings (what a Control Center toggle sends)
         snapshot = state.apply_settings({"enabled": {"wakanda-forever": False}})
         self.assertFalse(snapshot["enabled"]["wakanda-forever"])
         self.assertFalse(state.enabled_gestures["wakanda-forever"])
+
+        # Enable again
+        snapshot = state.apply_settings({"enabled": {"wakanda-forever": True}})
+        self.assertTrue(snapshot["enabled"]["wakanda-forever"])
+        self.assertTrue(state.enabled_gestures["wakanda-forever"])
 
 
 if __name__ == "__main__":

@@ -20,6 +20,12 @@ import queue
 import threading
 from typing import Callable, Any
 from core.gestures.screenshot import ScreenshotState
+from core.events import (
+    DEFAULT_ISLAND_POSITION,
+    DyneEvent,
+    island_accent_hex,
+    sanitize_island_position,
+)
 from config import (
     SCREENSHOT_HOLD_DURATION_S,
     HUD_ENABLED,
@@ -130,9 +136,15 @@ class ScreenshotOverlay:
         self.sh = self.root.winfo_screenheight()
 
         self.pad_top = 16
-        self.x = (self.sw - self.w) // 2
+        self.pad_side = 16
+        # Dyne position (persisted setting shared with the React island). The
+        # legacy constructor argument "TOP_CENTER" maps onto the same vocabulary.
+        self.position = sanitize_island_position(str(position).replace("_", "-"))
+        self.accent_color = COLOR_SAGE_ACCENT
+        self.x = self._compute_x()
         self.y_hidden = -self.h - 10
         self.y_visible = self.pad_top
+        self._apply_position(self.position)
 
         self.current_y = float(self.y_hidden)
         self.root.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.current_y)}")
@@ -230,6 +242,36 @@ class ScreenshotOverlay:
     def set_audio_controller(self, audio_controller) -> None:
         self._audio_controller = audio_controller
 
+    # ── Position (shared Dyne setting) ─────────────────────────────────────
+    def _compute_x(self) -> int:
+        pos = getattr(self, "position", DEFAULT_ISLAND_POSITION)
+        if pos == "top-left":
+            return self.pad_side
+        if pos == "top-right":
+            return max(0, self.sw - self.w - self.pad_side)
+        return (self.sw - self.w) // 2
+
+    def _apply_position(self, position: str) -> None:
+        """Recomputes the resting and hidden geometry for a Dyne position."""
+        self.position = sanitize_island_position(position)
+        if self.position == "bottom-center":
+            self.y_visible = max(0, self.sh - self.h - self.pad_top)
+            self.y_hidden = self.sh + 10
+        else:
+            self.y_visible = self.pad_top
+            self.y_hidden = -self.h - 10
+        self.x = self._compute_x()
+        if getattr(self, "_is_hidden", True):
+            self.current_y = float(self.y_hidden)
+        try:
+            self.root.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.current_y)}")
+        except Exception as e:
+            logger.debug("Overlay geometry update failed: %s", e)
+
+    def _notifications_allowed(self) -> bool:
+        """Discrete toasts honour both Dyne switches (F-15); progress capsules only the HUD switch."""
+        return bool(self.island_enabled and self.notifications_enabled)
+
     def _set_dimensions(self, w: int, h: int) -> None:
         self.target_w = w
         self.target_h = h
@@ -260,7 +302,9 @@ class ScreenshotOverlay:
             changed = True
 
         if changed:
-            self.x = (self.sw - self.w) // 2
+            self.x = self._compute_x()
+            if self.position == "bottom-center":
+                self.y_visible = max(0, self.sh - self.h - self.pad_top)
             self.canvas.configure(width=self.w, height=self.h)
             self.root.geometry(f"{self.w}x{self.h}+{self.x}+{int(self.current_y)}")
 
@@ -273,6 +317,9 @@ class ScreenshotOverlay:
 
     def show(self) -> None:
         if self._force_hide:
+            if not self.island_enabled:
+                # "Show HUD: Off" stays in force across a screenshot hide/show cycle.
+                return
             if self._island_state != "IDLE":
                 self.root.deiconify()
                 self.root.lift()
@@ -437,7 +484,7 @@ class ScreenshotOverlay:
         bars_cx = 95.0
         spacing = 7.5
         start_x = bars_cx - (len(bar_heights) - 1) * spacing / 2.0
-        bar_color = "#4b5563" if muted else COLOR_SAGE_ACCENT
+        bar_color = "#4b5563" if muted else self.accent_color
 
         for i, bh in enumerate(bar_heights):
             bx = start_x + i * spacing
@@ -490,7 +537,7 @@ class ScreenshotOverlay:
             fill_x2 = track_x1 + (track_x2 - track_x1) * vol
             self.canvas.create_line(
                 track_x1, track_y, fill_x2, track_y,
-                fill=COLOR_SAGE_ACCENT, width=2, capstyle=tk.ROUND
+                fill=self.accent_color, width=2, capstyle=tk.ROUND
             )
 
     def _draw_wakanda_capsule(self, w: float, h: float, cy: float) -> None:
@@ -608,7 +655,7 @@ class ScreenshotOverlay:
             self.canvas.create_text(
                 (badge_x1 + badge_x2) / 2.0, cy, anchor="center",
                 text=self._countdown_badge,
-                fill=COLOR_SAGE_ACCENT,
+                fill=self.accent_color,
                 font=("Segoe UI", 9, "bold")
             )
         elif self._island_subtext:
@@ -643,6 +690,23 @@ class ScreenshotOverlay:
                 break
             except Exception as e:
                 logger.debug("Error executing queued overlay action: %s", e)
+
+        if not self.island_enabled:
+            # "Show HUD: Off": nothing is drawn, including progress capsules.
+            if not self._is_hidden:
+                try:
+                    self.root.withdraw()
+                    self.root.update()
+                except Exception as e:
+                    logger.debug("Overlay withdraw failed: %s", e)
+                self._is_hidden = True
+            self._island_state = "IDLE"
+            self._island_mode = ""
+            self._is_volume_active = False
+            self._progress = 0.0
+            self._current_priority = 0
+            self.current_y = float(self.y_hidden)
+            return
 
         now = time.perf_counter()
         if now - self._last_ui_update < 0.033:
@@ -796,6 +860,8 @@ class ScreenshotOverlay:
             self.root.update()
 
     def show_success_toast(self, filename: str | None = None) -> None:
+        if not self._notifications_allowed():
+            return
         now = time.perf_counter()
         if not self._can_post_event(PRIORITY_CRITICAL, "Screenshot saved", now):
             return
@@ -815,6 +881,8 @@ class ScreenshotOverlay:
         self._is_hidden = False
 
     def show_error_toast(self) -> None:
+        if not self._notifications_allowed():
+            return
         now = time.perf_counter()
         if not self._can_post_event(PRIORITY_CRITICAL, "Screenshot failed", now):
             return
@@ -835,6 +903,8 @@ class ScreenshotOverlay:
 
     def show_app_toast(self, app_name: str = "WhatsApp", success: bool = True) -> None:
         def _action():
+            if not self._notifications_allowed():
+                return
             now = time.perf_counter()
             text = f"Opening {app_name}" if success else f"{app_name} not found"
             if not self._can_post_event(PRIORITY_CRITICAL, text, now):
@@ -857,6 +927,8 @@ class ScreenshotOverlay:
 
     def show_audio_toast(self, action: str, success: bool = True) -> None:
         def _action():
+            if not self._notifications_allowed():
+                return
             now = time.perf_counter()
             if not success:
                 text = "Audio control failed"
@@ -904,6 +976,8 @@ class ScreenshotOverlay:
         is_active: bool,
         is_muted: bool | None = None,
     ) -> None:
+        if not self.island_enabled:
+            return
         now = time.perf_counter()
         vol = max(0.0, min(1.0, float(volume_scalar)))
         vol_pct = int(round(vol * 100.0))
@@ -951,6 +1025,8 @@ class ScreenshotOverlay:
 
     def show_tracking_toast(self, transition: str) -> None:
         def _action():
+            if not self._notifications_allowed():
+                return
             now = time.perf_counter()
             if transition == "LOST":
                 text = "Hand lost"
@@ -981,6 +1057,8 @@ class ScreenshotOverlay:
 
     def show_pause_toast(self, is_paused: bool) -> None:
         def _action():
+            if not self._notifications_allowed():
+                return
             now = time.perf_counter()
             text = "System Paused" if is_paused else "System Resumed"
             icon = "PAUSE" if is_paused else "PLAY"
@@ -1006,6 +1084,8 @@ class ScreenshotOverlay:
 
     def show_runtime_status(self, status_info: dict, duration: float = HUD_STATUS_DURATION_S) -> None:
         def _action():
+            if not self.island_enabled:
+                return
             now = time.perf_counter()
             if not self._can_post_event(PRIORITY_STATUS, "STATUS", now):
                 return
@@ -1035,6 +1115,8 @@ class ScreenshotOverlay:
 
     def show_wakanda_complete(self) -> None:
         def _action():
+            if not self._notifications_allowed():
+                return
             now = time.perf_counter()
             self._current_priority = PRIORITY_CRITICAL
             self._last_event_text = "WAKANDA FOREVER"
@@ -1052,6 +1134,104 @@ class ScreenshotOverlay:
             self._is_hidden = False
         self._dispatch_to_main(_action)
 
+    def show_wakanda_failed(self) -> None:
+        """Windows rejected the lock request: standard error toast, never the success capsule."""
+        def _action():
+            if not self._notifications_allowed():
+                return
+            now = time.perf_counter()
+            text = "Lock request failed"
+            if not self._can_post_event(PRIORITY_CRITICAL, text, now):
+                return
+            self._current_priority = PRIORITY_CRITICAL
+            self._last_event_text = text
+            self._last_event_time = now
+            self._toast_until = now + HUD_TOAST_DURATION_S
+            self._island_state = "ERROR"
+            self._island_mode = ""
+            self._island_text = text
+            self._island_subtext = ""
+            self._island_icon = "CROSS"
+            self._island_color = COLOR_ERROR_RED
+            self._countdown_badge = ""
+            self._progress = 1.0
+            self._reset_dimensions()
+            self.root.deiconify()
+            self.root.lift()
+            self._is_hidden = False
+        self._dispatch_to_main(_action)
+
+    def show_notice(self, text: str, ok: bool = True, duration: float = HUD_TOAST_DURATION_S,
+                    priority: int = PRIORITY_CRITICAL) -> None:
+        """Generic one-line toast for Dyne events that have no dedicated capsule (e.g. drag faults)."""
+        def _action():
+            if not self._notifications_allowed():
+                return
+            now = time.perf_counter()
+            if not self._can_post_event(priority, text, now):
+                return
+            self._current_priority = priority
+            self._last_event_text = text
+            self._last_event_time = now
+            self._toast_until = now + max(0.5, float(duration))
+            self._island_state = "SUCCESS" if ok else "ERROR"
+            self._island_mode = ""
+            self._island_text = text
+            self._island_subtext = ""
+            self._island_icon = "CHECK" if ok else "CROSS"
+            self._island_color = COLOR_SAGE_ACCENT if ok else COLOR_ERROR_RED
+            self._countdown_badge = ""
+            self._progress = 1.0
+            self._reset_dimensions()
+            self._set_dimensions(max(220, min(360, 60 + 7 * len(text))), 44)
+            self.root.deiconify()
+            self.root.lift()
+            self._is_hidden = False
+        self._dispatch_to_main(_action)
+
+    def handle_event(self, event: DyneEvent) -> None:
+        """
+        Dyne dispatcher subscriber: maps catalogued events onto the desktop
+        capsule. Continuous HUD state (screenshot countdown, Wakanda hold,
+        live volume bars) is still driven directly from the engine loop; this
+        method only renders discrete notifications, each gated by the Dyne
+        switches inside the show_* methods. It runs on the publishing thread
+        and relies on the show_* methods' main-thread dispatch.
+        """
+        et = getattr(event, "type", "")
+        meta = getattr(event, "metadata", None) or {}
+        if et == "tracking.lost":
+            self.show_tracking_toast("LOST")
+        elif et == "tracking.recovered":
+            self.show_tracking_toast("REACQUIRED")
+        elif et == "engine.paused":
+            self.show_pause_toast(True)
+        elif et == "engine.resumed":
+            self.show_pause_toast(False)
+        elif et == "app.launched":
+            self.show_app_toast(str(meta.get("app", "WhatsApp")), True)
+        elif et == "app.launch_failed":
+            self.show_app_toast(str(meta.get("app", "WhatsApp")), False)
+        elif et == "audio.muted":
+            self.show_audio_toast("MUTED", True)
+        elif et == "audio.unmuted":
+            self.show_audio_toast(str(meta.get("action", "UNMUTED")), True)
+        elif et == "audio.failed":
+            self.show_audio_toast(str(meta.get("action", "AUDIO")), False)
+        elif et == "lock.accepted":
+            self.show_wakanda_complete()
+        elif et == "lock.failed":
+            self.show_wakanda_failed()
+        elif et == "drag.failed":
+            self.show_notice("Drag fault: release the left mouse button", ok=False, duration=3.0)
+        elif et == "power.save_entered":
+            self.start_power_save_countdown()
+        elif et == "power.wake":
+            self.show_wake_confirmed()
+        # screenshot.*: rendered from the ScreenshotController state in update_state
+        # engine.started/stopping, drag.started/completed/released, wakanda.confirmed,
+        # audio.volume, tracking.acquired: Control Center island only (no desktop toast).
+
     def configure(
         self,
         island_enabled: bool | None = None,
@@ -1060,6 +1240,8 @@ class ScreenshotOverlay:
         autohide_enabled: bool | None = None,
         hud_duration_s: float | None = None,
         completion_duration_s: float | None = None,
+        position: str | None = None,
+        appearance: dict | None = None,
     ) -> None:
         """Thread-safe dynamic configuration update from Control Server settings."""
         def _action():
@@ -1081,6 +1263,10 @@ class ScreenshotOverlay:
                 self.hud_duration_s = max(10.0, min(1800.0, float(hud_duration_s)))
             if completion_duration_s is not None:
                 self.completion_duration_s = max(1.0, min(5.0, float(completion_duration_s)))
+            if position is not None:
+                self._apply_position(str(position))
+            if appearance is not None:
+                self.accent_color = island_accent_hex(appearance)
         self._dispatch_to_main(_action)
 
     def cancel_power_save_countdown(self) -> None:

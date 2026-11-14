@@ -1,10 +1,15 @@
 import { filterWritableSettings } from "./capabilities";
 import type { CapabilityMap, AirPointHudSettings } from "./types";
+import type { DyneAppearance, DyneIslandPosition } from "@/lib/air-point-model";
 
 /** Narrow, injectable boundary for integration with useAirPointEngine(). */
 export interface DyneHostAdapter {
   setIslandSettings(updates: Partial<AirPointHudSettings>): Promise<boolean>;
   testDesktopCountdown?(durationS?: number): Promise<boolean>;
+  /** Persists the island position shared with the desktop overlay (unified migration). */
+  setIslandPosition?(position: DyneIslandPosition): Promise<boolean>;
+  /** Applies a capsule look to the live island and the desktop capsule accent. */
+  setIslandAppearance?(appearance: DyneAppearance): Promise<boolean>;
 }
 
 export interface SafeCommitResult {

@@ -36,6 +36,12 @@ class ScreenshotController:
         self.is_locking_cursor = False
         self._display_until = 0.0
         self.enabled: bool = SCREENSHOT_ENABLED
+        # Result callback (unified migration): called exactly once per capture
+        # attempt with (success, path) AFTER the actuator returned, so the bridge
+        # event can only say "captured" when a file was actually written (F-12).
+        # pre_capture_cb / post_capture_cb remain overlay hide/show hooks and run
+        # before the file is saved, which is why they must not emit events.
+        self.capture_result_cb = None
         self._hold_duration: float = float(SCREENSHOT_HOLD_DURATION_S)
         self.elapsed: float = 0.0
         self.remaining: float = self._hold_duration
@@ -151,6 +157,12 @@ class ScreenshotController:
                         self._state = ScreenshotState.ERROR
                         self.hud_text = "SCREENSHOT: ERROR"
                     self._display_until = now + 1.5
+                    result_cb = getattr(self, 'capture_result_cb', None)
+                    if result_cb:
+                        try:
+                            result_cb(bool(result), result if result else None)
+                        except Exception as e:
+                            logger.error("Screenshot result callback failed: %s", e)
             else:
                 if (now - self._last_valid_time) > SCREENSHOT_GRACE_PERIOD_S:
                     # Cancelled

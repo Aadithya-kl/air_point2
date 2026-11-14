@@ -112,7 +112,7 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var d=document.documentElement;var params=new URLSearchParams(window.location.search);var t=params.get("theme");var a=params.get("accent");var den=params.get("density");var r=localStorage.getItem("air-point.ui.preferences.v1");if(r){var p=JSON.parse(r);if(!t&&p.theme)t=p.theme;if(!a&&p.accent)a=p.accent;if(!den&&p.density)den=p.density;if(p.reducedMotion)d.setAttribute("data-reduced-motion","true");}if(!t)t="obsidian";d.setAttribute("data-theme",t);if(t==="titanium"){d.classList.remove("dark");d.classList.add("light");}else{d.classList.add("dark");d.classList.remove("light");}if(a)d.setAttribute("data-accent",a);if(den)d.setAttribute("data-density",den);}catch(e){}})();`,
+            __html: `(function(){try{var d=document.documentElement;var params=new URLSearchParams(window.location.search);var t=params.get("theme");var a=params.get("accent");var den=params.get("density");var r=localStorage.getItem("air-point.ui-preferences.v1");if(r){var p=JSON.parse(r);if(!t&&p.theme)t=p.theme;if(!a&&p.accent)a=p.accent;if(!den&&p.density)den=p.density;if(p.reducedMotion)d.setAttribute("data-reduced-motion","true");}if(!t)t="obsidian";d.setAttribute("data-theme",t);if(t==="titanium"){d.classList.remove("dark");d.classList.add("light");}else{d.classList.add("dark");d.classList.remove("light");}if(a)d.setAttribute("data-accent",a);if(den)d.setAttribute("data-density",den);}catch(e){}})();`,
           }}
         />
       </head>

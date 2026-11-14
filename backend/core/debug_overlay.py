@@ -40,6 +40,23 @@ def _lm_px(lm: Landmark, w: int, h: int) -> tuple[int, int]:
     return int(lm.x * w), int(lm.y * h)
 
 
+def _text_width(text: str, scale: float) -> int:
+    """Rendered width in pixels of `text` at `scale` for the HUD font."""
+    (tw, _th), _baseline = cv2.getTextSize(text, _FONT, scale, 1)
+    return int(tw)
+
+
+def _fit_line(text: str, scale: float, max_px: int) -> str:
+    """Return `text` unchanged when it fits in max_px, else the longest prefix + '...'."""
+    if _text_width(text, scale) <= max_px:
+        return text
+    ellipsis = "..."
+    cut = len(text)
+    while cut > 1 and _text_width(text[:cut] + ellipsis, scale) > max_px:
+        cut -= 1
+    return text[:cut] + ellipsis
+
+
 def _draw_hand(img: np.ndarray, lms: list[Landmark], color: tuple, label: str) -> None:
     h, w = img.shape[:2]
     # Draw thin, precise 2D tracking lines
@@ -231,7 +248,23 @@ def draw_debug_frame(
         send_res = "N/A"
         if orchestrator and hasattr(orchestrator, "_actuator") and hasattr(orchestrator._actuator, "_last_send_input_result"):
             lr = orchestrator._actuator._last_send_input_result
-            send_res = "OK" if lr is True else ("FAIL" if lr is False else "N/A")
+            if lr is True:
+                send_res = "OK"
+            elif lr is False:
+                send_res = "FAIL"
+            elif lr is None:
+                send_res = "N/A"
+            elif hasattr(lr, "value"):
+                if lr.value == "CONFIRMED":
+                    send_res = "OK"
+                elif lr.value == "FAILED":
+                    send_res = "FAIL"
+                elif lr.value == "UNCONFIRMED":
+                    send_res = "UNCERTAIN"
+                else:
+                    send_res = "N/A"
+            else:
+                send_res = "N/A"
         owner = getattr(orchestrator, "pointer_owner", "NONE") if orchestrator else "NONE"
         coord_src = getattr(orchestrator, "cursor_source_name", "NONE") if orchestrator else "NONE"
         moving = "YES" if getattr(orchestrator, "is_cursor_moving", False) else "NO"
@@ -255,9 +288,27 @@ def draw_debug_frame(
         if ear.is_active:
             hud_lines.append(f"EAR VOL   : {ear.status_text}")
 
-    # Top left dashboard panel with dynamic height to prevent text overflow
+    if orchestrator and getattr(orchestrator, '_wakanda', None) is not None:
+        wk = orchestrator._wakanda
+        hud_lines.append(f"WAKANDA   : {getattr(wk, 'hud_text', getattr(getattr(wk, 'state', None), 'name', 'N/A'))}")
+
+    # Top left dashboard panel. Height adapts to the number of lines; width adapts
+    # to the longest line (measured with cv2.getTextSize, not counted) so the drag
+    # diagnostics the physical test plan asks the user to read (BTN / SEND / REL)
+    # are no longer cut at 44 characters. When even the widest allowed panel
+    # cannot hold the longest line, the font shrinks a little (never below 0.34)
+    # instead of the panel covering the whole frame. Migrated from the legacy
+    # checkout, which only raised the truncation limit without widening the panel.
     line_spacing = 19
-    panel_w = 420
+    panel_margin = 24
+    min_panel_w = 420
+    max_panel_w = max(min_panel_w, w - 20)
+    font_scale = 0.42
+    longest_px = max((_text_width(line, font_scale) for line in hud_lines), default=0)
+    if longest_px + panel_margin > max_panel_w and longest_px > 0:
+        font_scale = max(0.34, font_scale * (max_panel_w - panel_margin) / float(longest_px))
+        longest_px = max((_text_width(line, font_scale) for line in hud_lines), default=0)
+    panel_w = int(min(max_panel_w, max(min_panel_w, longest_px + panel_margin)))
     panel_h = min(h - 35, max(220, 56 + len(hud_lines) * line_spacing + 8))
 
     overlay = out.copy()
@@ -276,20 +327,20 @@ def draw_debug_frame(
         y = 62 + idx * line_spacing
         if y > (10 + panel_h - 6):
             break
-        # Safe length truncation to avoid crossing panel width
-        disp_line = line if len(line) <= 44 else line[:41] + "..."
+        # Safe truncation against the measured panel width (rarely needed now)
+        disp_line = _fit_line(line, font_scale, panel_w - panel_margin)
         color = _WHITE if "TRACKING" in disp_line or "CURSOR" in disp_line else _GRAY
         if "LOST" in disp_line or "OFFLINE" in disp_line:
             color = _ALERT
-        if "STATE" in disp_line or "CLICK" in disp_line or "ZOOM" in disp_line or "SCREENSHOT" in disp_line or "EAR VOL" in disp_line or "LIP MUTE" in disp_line:
+        if "STATE" in disp_line or "CLICK" in disp_line or "ZOOM" in disp_line or "SCREENSHOT" in disp_line or "EAR VOL" in disp_line or "LIP MUTE" in disp_line or "WAKANDA" in disp_line:
             color = _CYAN
         if "LEFT CLICK" in disp_line or "SINGLE CLICK" in disp_line or "DOUBLE CLICK" in disp_line or "PENDING" in disp_line or "ZOOM:" in disp_line or "SCREENSHOT:" in disp_line:
             color = _WHITE
         if "FPS" in disp_line or "TIME" in disp_line:
             color = _BLUE
-        if "ERROR" in disp_line:
+        if "ERROR" in disp_line or "LOCK REQUEST FAILED" in disp_line:
             color = _ALERT
-        cv2.putText(out, disp_line, (22, y), _FONT, 0.42, color, 1, cv2.LINE_AA)
+        cv2.putText(out, disp_line, (22, y), _FONT, font_scale, color, 1, cv2.LINE_AA)
 
     # Help text at bottom
     cv2.putText(out, "Q: QUIT | P: PAUSE | S: STATUS | D: DEBUG", (15, h - 12), _FONT, 0.38, _GRAY, 1, cv2.LINE_AA)

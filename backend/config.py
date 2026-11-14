@@ -146,7 +146,7 @@ LEFT_DRAG_CONFIRM_S = 0.10             # Confirm hold duration (100ms) before dr
 LEFT_DRAG_ACTIVATION_DURATION_S = 0.10  # Fast grab activation
 LEFT_DRAG_START_NORM_DIST = 0.55       # Pinch entry threshold (thumb-index dist / palm width)
 LEFT_DRAG_RELEASE_NORM_DIST = 0.75     # Pinch release threshold (hysteresis prevents rapid oscillation)
-LEFT_DRAG_LOST_TIMEOUT_S = 0.075        # Dropout grace timeout (75ms / ~2 frames) before releasing drag on tracking loss
+LEFT_DRAG_LOST_TIMEOUT_S = 0.150        # Dropout grace timeout (150ms / ~2 frames at 15 FPS) before releasing drag on tracking loss
 
 # ── Phase 4: Two-Hand W Gesture / WhatsApp ───────────────────────────────────
 W_GESTURE_ENABLED = True
@@ -188,7 +188,9 @@ HUD_HAND_LOST_TIMEOUT_S = 0.35         # Continuous hand absence required before
 HUD_HAND_REARM_TIMEOUT_S = 0.15        # Continuous hand presence required before firing 'Hand reacquired'
 
 # ── Phase 8: Wakanda Forever Crossed-Arm Lock ──────────────────────────────
-WAKANDA_ENABLED = False                # Disabled by default for security
+WAKANDA_ENABLED = True                 # Available in normal runtime; disable here or with the Control Center
+                                       # "Lock Screen" toggle. Automated tests never lock: lock_fn is injected,
+                                       # AIRPOINT_DISABLE_REAL_LOCK=1 mocks the call, and the test guard blocks user32.
 WAKANDA_HOLD_DURATION_S = 2.0          # Required crossed-arm hold duration (seconds) before lock
 WAKANDA_GRACE_PERIOD_S = 0.15          # Grace period for brief frame loss
 WAKANDA_COOLDOWN_S = 2.0               # Delay after lock before gesture can rearm

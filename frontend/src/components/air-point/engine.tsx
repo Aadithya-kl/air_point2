@@ -12,8 +12,10 @@ import {
   type AirPointEvent,
   type CursorPresetId,
   CURSOR_PRESETS,
-  DEFAULT_BRIDGE_BASE_URL,
+  BRIDGE_BASE_URL,
   DEFAULT_DYNAMIC_ISLAND_SETTINGS,
+  DEFAULT_DYNE_APPEARANCE,
+  DEFAULT_DYNE_ISLAND_POSITION,
   DEFAULT_ENABLED_GESTURES,
   DEFAULT_HOLD_DURATION,
   DEFAULT_SENSITIVITY,
@@ -22,6 +24,9 @@ import {
   type DensityMode,
   type DynamicIslandSettings,
   type DynamicIslandState,
+  type DyneAppearance,
+  type DyneIslandPosition,
+  EVENT_HISTORY_LIMIT,
   type GestureId,
   type PointerOwner,
   type ThemeMode,
@@ -31,7 +36,11 @@ import {
   clampSensitivity,
   clampSmoothing,
   loadUIPreferences,
+  mergeEvents,
+  parseDyneEvent,
   resolveCursorPreset,
+  sanitizeDyneAppearance,
+  sanitizeDynePosition,
   saveUIPreferences,
 } from "@/lib/air-point-model";
 
@@ -41,6 +50,9 @@ export type BridgeConnectionState =
   | "paused"
   | "offline"
   | "error";
+
+/** State of the GET /api/events Server-Sent Events subscription. */
+export type EventStreamState = "unsupported" | "connecting" | "open" | "reconnecting";
 
 export interface EngineContextValue {
   // Live Bridge & Engine Telemetry
@@ -88,8 +100,19 @@ export interface EngineContextValue {
   resetCursorDefaults: () => Promise<boolean>;
   refreshStatusNow: () => Promise<void>;
 
-  // Live SSE Events (initialized empty — fixes DEF-04)
+  // Dyne position and appearance persisted by the engine (shared with the desktop overlay)
+  islandPosition: DyneIslandPosition;
+  islandAppearance: DyneAppearance;
+  setIslandPosition: (position: DyneIslandPosition) => Promise<boolean>;
+  setIslandAppearance: (appearance: DyneAppearance) => Promise<boolean>;
+
+  // Live Dyne events: merged from the SSE stream and the status poll, newest first,
+  // deduplicated by `${session}:${id}`, bounded to EVENT_HISTORY_LIMIT. Starts empty (DEF-04).
   events: AirPointEvent[];
+  eventStream: EventStreamState;
+  /** The real event the live notification island is currently showing (never a preview). */
+  liveNotification: AirPointEvent | null;
+  dismissLiveNotification: () => void;
 
   // In-App Dynamic Island Preview & Simulation State (Explicitly separated from OS)
   island: DynamicIslandState;
@@ -114,7 +137,7 @@ const EngineContext = createContext<EngineContextValue | null>(null);
 export const AirPointEngineProvider: React.FC<{
   children: React.ReactNode;
   bridgeUrl?: string;
-}> = ({ children, bridgeUrl = DEFAULT_BRIDGE_BASE_URL }) => {
+}> = ({ children, bridgeUrl = BRIDGE_BASE_URL }) => {
   // Live Engine State
   const [connected, setConnected] = useState<boolean>(false);
   const [hasAttemptedInitialConnect, setHasAttemptedInitialConnect] =
@@ -154,8 +177,26 @@ export const AirPointEngineProvider: React.FC<{
     null
   );
 
-  // Live SSE Activity Feed — MUST initialize empty (DEF-04 fix)
+  // Live Dyne event feed — MUST initialize empty (DEF-04 fix)
   const [events, setEvents] = useState<AirPointEvent[]>([]);
+  const [eventStream, setEventStream] = useState<EventStreamState>("connecting");
+  const [liveNotification, setLiveNotification] = useState<AirPointEvent | null>(null);
+  const liveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Highest engine sequence seen per session; events at or below it never re-trigger the island.
+  const latestSeqRef = useRef<{ session: string | null; seq: number; primed: boolean }>({
+    session: null,
+    seq: 0,
+    primed: false,
+  });
+  const islandSettingsRef = useRef<DynamicIslandSettings>({ ...DEFAULT_DYNAMIC_ISLAND_SETTINGS });
+  const feedbackDurationRef = useRef<number>(DEFAULT_UI_PREFERENCES.feedbackDuration);
+
+  // Dyne position / appearance (host-persisted)
+  const [islandPosition, setIslandPositionState] = useState<DyneIslandPosition>(DEFAULT_DYNE_ISLAND_POSITION);
+  const [islandAppearance, setIslandAppearanceState] = useState<DyneAppearance>({
+    ...DEFAULT_DYNE_APPEARANCE,
+    customRgb: { ...DEFAULT_DYNE_APPEARANCE.customRgb },
+  });
 
   // Simulation-Only Preview State (DEF-02 fix)
   const [island, setIsland] = useState<DynamicIslandState>("idle");
@@ -175,6 +216,82 @@ export const AirPointEngineProvider: React.FC<{
     const loaded = loadUIPreferences();
     setPreferences(loaded);
   }, []);
+
+  useEffect(() => {
+    feedbackDurationRef.current = preferences.feedbackDuration;
+  }, [preferences.feedbackDuration]);
+
+  useEffect(() => {
+    islandSettingsRef.current = islandSettings;
+  }, [islandSettings]);
+
+  const dismissLiveNotification = useCallback(() => {
+    if (liveTimeoutRef.current) {
+      clearTimeout(liveTimeoutRef.current);
+      liveTimeoutRef.current = null;
+    }
+    setLiveNotification(null);
+  }, []);
+
+  /**
+   * Folds bridge events into the feed. Only events newer than everything seen
+   * so far in the current engine session drive the live island, and never the
+   * history that was already there when the Control Center connected; "low"
+   * priority events (engine start) are logged but not shown. The island also
+   * honours the host's Dyne switches, so a disabled HUD stays silent here too.
+   */
+  const ingestEvents = useCallback((incoming: AirPointEvent[]) => {
+    if (incoming.length === 0) return;
+    setEvents((prev) => mergeEvents(prev, incoming, EVENT_HISTORY_LIMIT));
+
+    const tracker = latestSeqRef.current;
+    let candidate: AirPointEvent | null = null;
+    const sequenced = incoming
+      .filter((ev) => typeof ev.sequence === "number")
+      .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+    for (const ev of sequenced) {
+      const session = ev.session ?? null;
+      if (tracker.session !== session) {
+        // New engine session: everything from it is new, but the first batch is history.
+        tracker.session = session;
+        tracker.seq = 0;
+        tracker.primed = false;
+      }
+      const seq = ev.sequence ?? 0;
+      if (seq > tracker.seq) {
+        if (tracker.primed) candidate = ev;
+        tracker.seq = seq;
+      }
+    }
+    if (!tracker.primed) {
+      tracker.primed = true;
+      return;
+    }
+    if (!candidate) return;
+    if (candidate.priority === "low") return;
+    const hud = islandSettingsRef.current;
+    if (!hud.enabled || !hud.notificationsEnabled) return;
+
+    if (liveTimeoutRef.current) {
+      clearTimeout(liveTimeoutRef.current);
+      liveTimeoutRef.current = null;
+    }
+    setLiveNotification(candidate);
+    if (hud.autohideEnabled) {
+      const seconds = candidate.durationS ?? feedbackDurationRef.current;
+      liveTimeoutRef.current = setTimeout(() => {
+        liveTimeoutRef.current = null;
+        setLiveNotification((current) => (current && current.id === candidate!.id ? null : current));
+      }, Math.max(500, seconds * 1000));
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (liveTimeoutRef.current) clearTimeout(liveTimeoutRef.current);
+    },
+    []
+  );
 
   // Apply theme, accent, density, and reduced-motion attributes to <html>
   useEffect(() => {
@@ -302,6 +419,12 @@ export const AirPointEngineProvider: React.FC<{
         ...(enabledVal as Partial<Record<GestureId, boolean>>),
       }));
     }
+    const positionVal = sanitizeDynePosition(settings["island_position"]);
+    if (positionVal) setIslandPositionState(positionVal);
+    const appearanceVal = settings["island_appearance"];
+    if (appearanceVal && typeof appearanceVal === "object") {
+      setIslandAppearanceState((prev) => sanitizeDyneAppearance(appearanceVal, prev));
+    }
   }, []);
 
   // Poll GET /api/status every 1500ms
@@ -353,22 +476,33 @@ export const AirPointEngineProvider: React.FC<{
         applySettingsPayload(data.settings as Record<string, unknown>);
       }
       if (Array.isArray(data.events) && data.events.length > 0) {
-        setEvents((prev) => {
-          const incoming: AirPointEvent[] = data.events.map(
-            (ev: Record<string, unknown>, idx: number) => {
-              const timeVal = ev["time"];
-              const actionVal = ev["action"];
-              const eventVal = ev["event"];
-              return {
-                id: `${timeVal ?? "t"}-${actionVal ?? idx}`,
-                event: String(eventVal ?? "info"),
-                action: String(actionVal ?? "System event"),
-                time: String(timeVal ?? "Just now"),
-              };
+        const session = typeof data.event_session === "string" ? data.event_session : undefined;
+        const incoming = (data.events as unknown[])
+          .map((ev, idx) => {
+            const parsed = parseDyneEvent(ev, idx);
+            if (parsed && parsed.session === undefined && session !== undefined && parsed.sequence !== undefined) {
+              return { ...parsed, session, id: `${session}:${parsed.sequence}` };
             }
-          );
-          return incoming.slice(0, 12);
-        });
+            return parsed;
+          })
+          .filter((ev): ev is AirPointEvent => ev !== null);
+        ingestEvents(incoming);
+      }
+      // Prime the live-notification tracker on first contact (and after an
+      // engine restart seen through the poll): everything that already exists
+      // in the bridge ring is history, only later events may raise the island.
+      {
+        const sessionId = typeof data.event_session === "string" ? (data.event_session as string) : null;
+        const lastId = typeof data.last_event_id === "number" ? (data.last_event_id as number) : 0;
+        const tracker = latestSeqRef.current;
+        if (!tracker.primed || tracker.session !== sessionId) {
+          if (tracker.session !== sessionId) {
+            tracker.session = sessionId;
+            tracker.seq = lastId;
+          }
+          tracker.seq = Math.max(tracker.seq, lastId);
+          tracker.primed = true;
+        }
       }
     } catch {
       if (pollSequence === lifecycleSequenceRef.current && !lifecycleLockRef.current) {
@@ -384,7 +518,7 @@ export const AirPointEngineProvider: React.FC<{
     } finally {
       clearTimeout(timer);
     }
-  }, [bridgeUrl, applySettingsPayload]);
+  }, [bridgeUrl, applySettingsPayload, ingestEvents]);
 
   useEffect(() => {
     refreshStatusNow();
@@ -392,42 +526,67 @@ export const AirPointEngineProvider: React.FC<{
     return () => clearInterval(interval);
   }, [refreshStatusNow]);
 
-  // Subscribe to GET /api/events SSE stream
+  // Subscribe to GET /api/events (Server-Sent Events). Every message carries an
+  // `id:` line, so after a dropped connection the browser resends Last-Event-ID
+  // and the bridge replays the missed events from its ring before live ones. A
+  // different `session` in the hello means the engine restarted: the feed is
+  // rebuilt from /api/events/history instead of mixing two runs.
   useEffect(() => {
-    if (typeof EventSource === "undefined") return;
+    if (typeof EventSource === "undefined") {
+      setEventStream("unsupported");
+      return;
+    }
     let es: EventSource | null = null;
+    let everOpened = false;
+    let knownSession: string | null = null;
     try {
       es = new EventSource(`${bridgeUrl}/api/events`);
+      es.onopen = () => {
+        everOpened = true;
+        setEventStream("open");
+      };
+      es.onerror = () => {
+        setEventStream(everOpened ? "reconnecting" : "connecting");
+      };
       es.onmessage = (msg) => {
         try {
           const parsed = JSON.parse(msg.data);
-          if (parsed && parsed.action) {
-            const newEvent: AirPointEvent = {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-              event: String(parsed.event ?? "gesture"),
-              action: String(parsed.action),
-              time: String(
-                parsed.time ??
-                  new Date().toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })
-              ),
-            };
-            setEvents((prev) => [newEvent, ...prev].slice(0, 12));
+          if (!parsed || typeof parsed !== "object") return;
+          if (parsed.event === "connected") {
+            const session = typeof parsed.session === "string" ? parsed.session : null;
+            if (session && knownSession && session !== knownSession) {
+              setEvents([]);
+              latestSeqRef.current = { session: null, seq: 0, primed: false };
+              fetch(`${bridgeUrl}/api/events/history`)
+                .then((res) => (res.ok ? res.json() : null))
+                .then((data) => {
+                  if (data && Array.isArray(data.events)) {
+                    const history = (data.events as unknown[])
+                      .map((ev, idx) => parseDyneEvent(ev, idx))
+                      .filter((ev): ev is AirPointEvent => ev !== null);
+                    ingestEvents(history);
+                  }
+                })
+                .catch(() => {
+                  /* the next status poll repopulates the feed */
+                });
+            }
+            knownSession = session;
+            return;
           }
+          const event = parseDyneEvent(parsed);
+          if (event) ingestEvents([event]);
         } catch {
           // Ignore malformed SSE keepalive frames
         }
       };
     } catch {
-      // EventSource connection failure handled via /api/status heartbeat
+      setEventStream("unsupported");
     }
     return () => {
       if (es) es.close();
     };
-  }, [bridgeUrl]);
+  }, [bridgeUrl, ingestEvents]);
 
   // Helper for POST /api/settings
   const postSettingsMutation = useCallback(
@@ -466,7 +625,7 @@ export const AirPointEngineProvider: React.FC<{
         return true;
       } catch {
         setLastMutationError(
-          `Cannot apply "${label}" while Python bridge (127.0.0.1:8765) is unreachable.`
+          `Cannot apply "${label}" while the Python bridge (${bridgeUrl.replace(/^https?:\/\//, "")}) is unreachable.`
         );
         return false;
       } finally {
@@ -691,6 +850,31 @@ export const AirPointEngineProvider: React.FC<{
     [postSettingsMutation]
   );
 
+  const setIslandPosition = useCallback(
+    async (position: DyneIslandPosition): Promise<boolean> => {
+      const safe = sanitizeDynePosition(position);
+      if (!safe) return false;
+      return postSettingsMutation(
+        `Dyne position ${safe}`,
+        { island_position: safe },
+        () => setIslandPositionState(safe)
+      );
+    },
+    [postSettingsMutation]
+  );
+
+  const setIslandAppearance = useCallback(
+    async (appearance: DyneAppearance): Promise<boolean> => {
+      const safe = sanitizeDyneAppearance(appearance);
+      return postSettingsMutation(
+        "Dyne appearance",
+        { island_appearance: safe },
+        () => setIslandAppearanceState(safe)
+      );
+    },
+    [postSettingsMutation]
+  );
+
   const testDesktopCountdown = useCallback(
     async (durationS: number = 5.0): Promise<boolean> => {
       try {
@@ -845,7 +1029,14 @@ export const AirPointEngineProvider: React.FC<{
       testDesktopCountdown,
       resetCursorDefaults,
       refreshStatusNow,
+      islandPosition,
+      islandAppearance,
+      setIslandPosition,
+      setIslandAppearance,
       events,
+      eventStream,
+      liveNotification,
+      dismissLiveNotification,
       island,
       triggerIslandPreview,
       previewVolume,
@@ -894,7 +1085,14 @@ export const AirPointEngineProvider: React.FC<{
       testDesktopCountdown,
       resetCursorDefaults,
       refreshStatusNow,
+      islandPosition,
+      islandAppearance,
+      setIslandPosition,
+      setIslandAppearance,
       events,
+      eventStream,
+      liveNotification,
+      dismissLiveNotification,
       island,
       triggerIslandPreview,
       previewVolume,

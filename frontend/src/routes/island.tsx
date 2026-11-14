@@ -22,14 +22,23 @@ const DYNE_HOST_CAPABILITIES: CapabilityMap = {
 
 export function DynamicIslandPage() {
   const engine = useAirPointEngine();
-  const { islandSettings, islandSettingsSynced, setIslandSettings, testDesktopCountdown } = engine;
+  const {
+    islandSettings,
+    islandSettingsSynced,
+    setIslandSettings,
+    testDesktopCountdown,
+    setIslandPosition,
+    setIslandAppearance,
+  } = engine;
 
   const hostAdapter = useMemo<DyneHostAdapter>(
     () => ({
       setIslandSettings: (updates) => setIslandSettings(updates),
       testDesktopCountdown: (durationS = 5) => testDesktopCountdown(durationS),
+      setIslandPosition: (position) => setIslandPosition(position),
+      setIslandAppearance: (appearance) => setIslandAppearance(appearance),
     }),
-    [setIslandSettings, testDesktopCountdown],
+    [setIslandSettings, testDesktopCountdown, setIslandPosition, setIslandAppearance],
   );
 
   return (
@@ -44,6 +53,8 @@ export function DynamicIslandPage() {
           desktopSettings={islandSettings}
           hostConnected={engine.connected}
           settingsSynced={islandSettingsSynced}
+          islandPosition={engine.islandPosition}
+          appliedAppearance={engine.islandAppearance}
         />
       </section>
     </div>
