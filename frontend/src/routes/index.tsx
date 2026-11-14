@@ -60,21 +60,22 @@ export const OverviewPage: React.FC = () => {
       : "Waiting for camera stream"
     : "No live camera feed";
 
-  // Section 7 Requirement: Show at most the three most recent events, newest first.
-  // Group consecutive identical events (such as repeated volume triggers) to eliminate clutter.
+  // Show the most recent Dyne events, newest first. Consecutive events of the
+  // same type (such as coalesced volume steps) are grouped to eliminate clutter.
   const displayRecentEvents = React.useMemo(() => {
     if (!engine.events || engine.events.length === 0) return [];
     const grouped: (typeof engine.events[0] & { count: number })[] = [];
     for (const ev of engine.events) {
       const prev = grouped[grouped.length - 1];
-      if (prev && prev.action === ev.action && prev.event === ev.event) {
+      const sameKind = prev && (prev.type ?? prev.event) === (ev.type ?? ev.event);
+      if (prev && sameKind && (prev.title ?? prev.action) === (ev.title ?? ev.action)) {
         prev.count += 1;
       } else {
         grouped.push({ ...ev, count: 1 });
       }
-      if (grouped.length >= 3) break;
+      if (grouped.length >= 5) break;
     }
-    return grouped.slice(0, 3);
+    return grouped.slice(0, 5);
   }, [engine.events]);
 
   return (
@@ -322,7 +323,9 @@ export const OverviewPage: React.FC = () => {
             <span className="activity-sub">Live gesture triggers</span>
           </div>
           <span className="font-mono text-[10px] tracking-wider text-[var(--muted)]">
-            {engine.connected ? `${engine.events.length} EVENTS` : "LIVE EVENTS UNAVAILABLE"}
+            {engine.connected
+              ? `${engine.events.length} EVENTS · STREAM ${engine.eventStream.toUpperCase()}`
+              : "LIVE EVENTS UNAVAILABLE"}
           </span>
         </div>
 
@@ -351,14 +354,25 @@ export const OverviewPage: React.FC = () => {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-xs truncate flex items-center gap-1.5">
-                    <span>{item.action}</span>
+                    <span>{item.title ?? item.action}</span>
                     {item.count > 1 && (
                       <span className="badge text-[10px] py-0 px-1 font-mono">
                         ×{item.count}
                       </span>
                     )}
+                    {item.priority === "critical" && (
+                      <span className="badge text-[10px] py-0 px-1 font-mono text-rose-400">
+                        CRITICAL
+                      </span>
+                    )}
                   </div>
-                  <div className="font-mono text-[10px] text-[var(--muted)]">{item.time}</div>
+                  {item.title && item.message && item.message !== item.title && (
+                    <div className="text-[11px] text-[var(--muted)] truncate">{item.message}</div>
+                  )}
+                  <div className="font-mono text-[10px] text-[var(--muted)]">
+                    {item.time}
+                    {item.source ? ` · ${item.source}` : ""}
+                  </div>
                 </div>
               </div>
             ))}

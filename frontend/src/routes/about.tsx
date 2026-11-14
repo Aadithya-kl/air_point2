@@ -13,10 +13,13 @@ import {
   Monitor,
 } from "lucide-react";
 import { useAirPointEngine } from "@/components/air-point/engine";
+import { bridgeHostLabel } from "@/lib/air-point-model";
 
 export const AboutPage: React.FC = () => {
   const engine = useAirPointEngine();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const bridgeHost = bridgeHostLabel(engine.bridgeUrl);
+  const bridgePort = bridgeHost.includes(":") ? bridgeHost.slice(bridgeHost.lastIndexOf(":") + 1) : "80";
 
   const diagnostics = engine.getDiagnosticsReport();
   const diagnosticsJson = JSON.stringify(diagnostics, null, 2);
@@ -90,7 +93,7 @@ export const AboutPage: React.FC = () => {
                 }`}
               />
               <span>
-                {engine.connected ? "Connected · 127.0.0.1:8765" : "Offline · Local preview mode"}
+                {engine.connected ? `Connected · ${bridgeHost}` : "Offline · Local preview mode"}
               </span>
             </div>
           </div>
@@ -217,7 +220,7 @@ export const AboutPage: React.FC = () => {
                 engine.connected ? "text-emerald-400" : "text-amber-400"
               }`}
             >
-              {engine.connected ? "ONLINE (8765)" : "OFFLINE"}
+              {engine.connected ? `ONLINE (${bridgePort})` : "OFFLINE"}
             </div>
           </div>
 
@@ -251,9 +254,9 @@ export const AboutPage: React.FC = () => {
         <div className="text-[11.5px] text-[var(--muted)] leading-relaxed flex items-start gap-2 p-3 rounded-xl bg-[var(--surface-soft)] border border-[var(--line-divider)]">
           <Info className="w-4 h-4 text-[var(--accent)] shrink-0 mt-0.5" />
           <span>
-            Desktop controls write only the six settings supported by the existing AirPoint bridge.
-            Engine power state is shown separately from the HUD's presentation phase; Concept
-            appearance changes stay local to Studio.
+            Desktop controls write the Dyne settings the bridge persists (HUD switches, timings,
+            position and the applied capsule look). Engine power state is shown separately from the
+            HUD's presentation phase; Studio capsules are previews until a look is applied.
           </span>
         </div>
 
@@ -345,7 +348,13 @@ export const AboutPage: React.FC = () => {
             </div>
             <div className="flex justify-between py-1 border-b border-[var(--line-divider)]">
               <span>Bridge Protocol</span>
-              <span className="text-[var(--text)]">WebSocket (ws://127.0.0.1:8765)</span>
+              <span className="text-[var(--text)]">HTTP status poll + Server-Sent Events ({engine.bridgeUrl})</span>
+            </div>
+            <div className="flex justify-between py-1 border-b border-[var(--line-divider)]">
+              <span>Event Stream</span>
+              <span className="text-[var(--text)]" data-testid="event-stream-state">
+                {engine.eventStream.toUpperCase()}
+              </span>
             </div>
           </div>
         </div>

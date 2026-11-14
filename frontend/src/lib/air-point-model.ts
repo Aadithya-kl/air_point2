@@ -52,11 +52,223 @@ export interface GestureSpec {
   engineNotes: string;
 }
 
+export type DyneEventPriority = "low" | "normal" | "high" | "critical";
+
+/**
+ * One Dyne event as published by the Python engine (backend/core/events.py).
+ * `id` is the stable client key (`${session}:${sequence}`); the legacy
+ * `event` / `action` / `time` fields are kept because older bridge payloads
+ * only carried those.
+ */
 export interface AirPointEvent {
   id: string;
   event: string;
   action: string;
   time: string;
+  type?: string;
+  sequence?: number;
+  session?: string;
+  timestamp?: number;
+  source?: string;
+  title?: string;
+  message?: string;
+  priority?: DyneEventPriority;
+  durationS?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export const EVENT_HISTORY_LIMIT = 50;
+const VALID_PRIORITIES = new Set<DyneEventPriority>(["low", "normal", "high", "critical"]);
+
+/** Parses one bridge event payload (unified schema or legacy) into an AirPointEvent. */
+export function parseDyneEvent(raw: unknown, fallbackIndex = 0): AirPointEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const message =
+    typeof r["message"] === "string"
+      ? (r["message"] as string)
+      : typeof r["action"] === "string"
+        ? (r["action"] as string)
+        : null;
+  if (message === null) return null;
+  const sequence = typeof r["id"] === "number" && Number.isFinite(r["id"]) ? (r["id"] as number) : undefined;
+  const session = typeof r["session"] === "string" ? (r["session"] as string) : undefined;
+  const time =
+    typeof r["time"] === "string"
+      ? (r["time"] as string)
+      : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const type =
+    typeof r["event_type"] === "string"
+      ? (r["event_type"] as string)
+      : typeof r["type"] === "string" && (r["type"] as string).includes(".")
+        ? (r["type"] as string)
+        : undefined;
+  const kind =
+    typeof r["event"] === "string"
+      ? (r["event"] as string)
+      : typeof r["type"] === "string"
+        ? (r["type"] as string)
+        : "info";
+  const id =
+    sequence !== undefined
+      ? `${session ?? "local"}:${sequence}`
+      : `${time}-${message}-${fallbackIndex}`;
+  const priorityRaw = r["priority"];
+  const priority = VALID_PRIORITIES.has(priorityRaw as DyneEventPriority)
+    ? (priorityRaw as DyneEventPriority)
+    : undefined;
+  const metadata =
+    r["metadata"] && typeof r["metadata"] === "object"
+      ? (r["metadata"] as Record<string, unknown>)
+      : undefined;
+  return {
+    id,
+    event: kind,
+    action: message,
+    time,
+    ...(type !== undefined ? { type } : {}),
+    ...(sequence !== undefined ? { sequence } : {}),
+    ...(session !== undefined ? { session } : {}),
+    ...(typeof r["timestamp"] === "number" ? { timestamp: r["timestamp"] as number } : {}),
+    ...(typeof r["source"] === "string" ? { source: r["source"] as string } : {}),
+    ...(typeof r["title"] === "string" ? { title: r["title"] as string } : {}),
+    message,
+    ...(priority !== undefined ? { priority } : {}),
+    ...(typeof r["duration_s"] === "number" ? { durationS: r["duration_s"] as number } : {}),
+    ...(metadata !== undefined ? { metadata } : {}),
+  };
+}
+
+/**
+ * Merges incoming events into the existing list: newest first, no duplicate
+ * ids, bounded. Events with a sequence number order by sequence (within a
+ * session); anything else falls back to timestamp / arrival order.
+ */
+export function mergeEvents(
+  existing: AirPointEvent[],
+  incoming: AirPointEvent[],
+  limit: number = EVENT_HISTORY_LIMIT,
+): AirPointEvent[] {
+  const byId = new Map<string, AirPointEvent>();
+  for (const ev of [...incoming, ...existing]) {
+    if (!byId.has(ev.id)) byId.set(ev.id, ev);
+  }
+  const merged = Array.from(byId.values());
+  const rank = (ev: AirPointEvent): number => {
+    if (typeof ev.timestamp === "number") return ev.timestamp * 1000 + (ev.sequence ?? 0) / 1_000_000;
+    if (typeof ev.sequence === "number") return ev.sequence;
+    return 0;
+  };
+  merged.sort((a, b) => rank(b) - rank(a));
+  return merged.slice(0, limit);
+}
+
+/** Dyne island position persisted by the engine and shared with the desktop overlay. */
+export type DyneIslandPosition = "top-center" | "top-left" | "top-right" | "bottom-center";
+export const DYNE_ISLAND_POSITIONS: readonly DyneIslandPosition[] = [
+  "top-center",
+  "top-left",
+  "top-right",
+  "bottom-center",
+];
+export const DEFAULT_DYNE_ISLAND_POSITION: DyneIslandPosition = "top-center";
+
+export function sanitizeDynePosition(raw: unknown): DyneIslandPosition | null {
+  return typeof raw === "string" && (DYNE_ISLAND_POSITIONS as readonly string[]).includes(raw)
+    ? (raw as DyneIslandPosition)
+    : null;
+}
+
+/** Dyne appearance (the Studio's capsule look) persisted by the engine. */
+export interface DyneAppearance {
+  accent: string;
+  texture: string;
+  font: string;
+  fontSize: number;
+  weight: number;
+  intensity: number;
+  matteIntensity: number;
+  translucentIntensity: number;
+  roundness: number;
+  style: string;
+  customRgb: { r: number; g: number; b: number };
+}
+
+export const DEFAULT_DYNE_APPEARANCE: DyneAppearance = {
+  accent: "Gold",
+  texture: "Glass",
+  font: "System",
+  fontSize: 23,
+  weight: 400,
+  intensity: 50,
+  matteIntensity: 50,
+  translucentIntensity: 50,
+  roundness: 56,
+  style: "Balanced",
+  customRgb: { r: 140, g: 80, b: 255 },
+};
+
+const DYNE_COLOUR_HEX: Record<string, string> = {
+  Brown: "#a7784c", Red: "#ef505c", Blue: "#348cff", Neon: "#b1ed4e", Green: "#3cd6a0",
+  White: "#edf5ff", Grey: "#8794a1", Gold: "#f4c75b", Purple: "#b37bea", Orange: "#f7a34e",
+  Cyan: "#48D8E8", Teal: "#159E98", Mint: "#91E7C0", Lime: "#C4EE52", Yellow: "#F4DB55",
+  Amber: "#ED9D42", Coral: "#FF8075", Crimson: "#BD334E", Rose: "#F18BB3", Magenta: "#DC5BD8",
+};
+
+function clampInt(value: unknown, lo: number, hi: number, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
+}
+
+export function sanitizeDyneAppearance(raw: unknown, base: DyneAppearance = DEFAULT_DYNE_APPEARANCE): DyneAppearance {
+  const current: DyneAppearance = { ...base, customRgb: { ...base.customRgb } };
+  if (!raw || typeof raw !== "object") return current;
+  const r = raw as Record<string, unknown>;
+  const accent = r["accent"];
+  if (typeof accent === "string" && (accent === "Custom" || accent in DYNE_COLOUR_HEX)) current.accent = accent;
+  const texture = r["texture"];
+  if (texture === "Matte" || texture === "Glass" || texture === "Translucent") current.texture = texture;
+  const style = r["style"];
+  if (style === "Luminous" || style === "Balanced" || style === "Quiet") current.style = style;
+  const font = r["font"];
+  if (font === "System" || font === "Mono" || font === "Humanist") current.font = font;
+  current.fontSize = clampInt(r["fontSize"] ?? current.fontSize, 18, 28, current.fontSize);
+  current.weight = clampInt(r["weight"] ?? current.weight, 300, 800, current.weight);
+  current.intensity = clampInt(r["intensity"] ?? current.intensity, 0, 100, current.intensity);
+  current.matteIntensity = clampInt(r["matteIntensity"] ?? current.matteIntensity, 0, 100, current.matteIntensity);
+  current.translucentIntensity = clampInt(
+    r["translucentIntensity"] ?? current.translucentIntensity, 0, 100, current.translucentIntensity,
+  );
+  current.roundness = clampInt(r["roundness"] ?? current.roundness, 28, 56, current.roundness);
+  const rgb = r["customRgb"];
+  if (rgb && typeof rgb === "object") {
+    const c = rgb as Record<string, unknown>;
+    current.customRgb = {
+      r: clampInt(c["r"] ?? current.customRgb.r, 0, 255, current.customRgb.r),
+      g: clampInt(c["g"] ?? current.customRgb.g, 0, 255, current.customRgb.g),
+      b: clampInt(c["b"] ?? current.customRgb.b, 0, 255, current.customRgb.b),
+    };
+  }
+  return current;
+}
+
+export function dyneAccentHex(appearance: DyneAppearance): string {
+  if (appearance.accent === "Custom") {
+    const { r, g, b } = appearance.customRgb;
+    return `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  }
+  return DYNE_COLOUR_HEX[appearance.accent] ?? DYNE_COLOUR_HEX["Gold"]!;
+}
+
+export function appearanceEquals(a: DyneAppearance | null | undefined, b: DyneAppearance | null | undefined): boolean {
+  if (!a || !b) return false;
+  return (
+    a.accent === b.accent && a.texture === b.texture && a.font === b.font && a.fontSize === b.fontSize &&
+    a.weight === b.weight && a.intensity === b.intensity && a.matteIntensity === b.matteIntensity &&
+    a.translucentIntensity === b.translucentIntensity && a.roundness === b.roundness && a.style === b.style &&
+    a.customRgb.r === b.customRgb.r && a.customRgb.g === b.customRgb.g && a.customRgb.b === b.customRgb.b
+  );
 }
 
 export interface UIPreferences {
@@ -78,6 +290,32 @@ export interface CursorPreset {
 
 export const UI_PREFERENCES_STORAGE_KEY = "air-point.ui-preferences.v1";
 export const DEFAULT_BRIDGE_BASE_URL = "http://127.0.0.1:8765";
+
+/**
+ * Bridge discovery (F-10): the launcher reads backend/bridge_info.json after the
+ * engine bound its port and passes the origin as VITE_AIRPOINT_BRIDGE_URL to the
+ * dev server. Only loopback http origins are accepted; anything else falls back
+ * to the default so a stray environment value can never point the Control
+ * Center at a non-local host.
+ */
+export function resolveBridgeBaseUrl(candidate: unknown): string {
+  if (typeof candidate !== "string") return DEFAULT_BRIDGE_BASE_URL;
+  const trimmed = candidate.trim().replace(/\/+$/, "");
+  const match = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?$/i.exec(trimmed);
+  if (!match) return DEFAULT_BRIDGE_BASE_URL;
+  const port = match[2] !== undefined ? Number(match[2]) : 80;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return DEFAULT_BRIDGE_BASE_URL;
+  return `http://${match[1]!.toLowerCase()}${match[2] !== undefined ? `:${port}` : ""}`;
+}
+
+export const BRIDGE_BASE_URL: string = resolveBridgeBaseUrl(
+  (import.meta.env as unknown as Record<string, unknown>)["VITE_AIRPOINT_BRIDGE_URL"],
+);
+
+/** Host:port shown in status pills, derived from the resolved bridge URL. */
+export function bridgeHostLabel(bridgeUrl: string): string {
+  return bridgeUrl.replace(/^https?:\/\//i, "");
+}
 
 export const DEFAULT_SENSITIVITY = 0.85;
 export const DEFAULT_SMOOTHING = 65;
@@ -315,7 +553,7 @@ export const GESTURE_SPECS: ReadonlyArray<GestureSpec> = [
       "Cross both forearms over your chest with closed fists and hold steady for 2.0 continuous seconds.",
     windowsAction: "Locks the Windows workstation immediately via Win32 LockWorkStation.",
     engineNotes:
-      "Requires crossed arm geometry and continuous 2.0s hold. Disabled by default for security.",
+      "Requires crossed arm geometry and a continuous 2.0s hold, then a 2.0s cooldown and release before it can fire again. Enabled by default; switch it off here if you do not want a lock gesture.",
   },
   {
     id: "mute",
@@ -366,7 +604,7 @@ export const DEFAULT_ENABLED_GESTURES: Record<GestureId, boolean> = {
   mute: true,
   "volume-up": true,
   "volume-down": true,
-  "wakanda-forever": false,
+  "wakanda-forever": true,
 };
 
 export function clampSensitivity(value: number): number {

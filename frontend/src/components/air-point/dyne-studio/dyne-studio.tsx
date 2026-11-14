@@ -13,6 +13,9 @@ import {
   Droplet,
   Circle,
   Eye,
+  Move,
+  Check,
+  Download,
 } from "lucide-react";
 import { MotionConfig, useReducedMotion } from "framer-motion";
 import { SegmentedCapsuleShell, type ShellOption } from "./segmented-capsule-shell";
@@ -35,6 +38,19 @@ import { PREVIEW_CAPSULES, type CapsuleDefinition } from "./capsules";
 import type { DyneHostAdapter } from "./layered/host-adapter";
 import type { AirPointHudSettings, CapabilityMap } from "./layered/types";
 import { commitDesktopSettings, runDesktopCountdownTest } from "./layered/host-adapter";
+import {
+  DYNE_ISLAND_POSITIONS,
+  appearanceEquals,
+  type DyneAppearance,
+  type DyneIslandPosition,
+} from "@/lib/air-point-model";
+
+const POSITION_LABELS: Record<DyneIslandPosition, string> = {
+  "top-center": "Top centre",
+  "top-left": "Top left",
+  "top-right": "Top right",
+  "bottom-center": "Bottom centre",
+};
 
 function getTitle(view: View): string {
   if (view.kind === "rest") return "Your capsule. Your way.";
@@ -42,6 +58,7 @@ function getTitle(view: View): string {
   if (view.kind === "category") {
     if (view.category === "Text") return "Choose a text setting.";
     if (view.category === "Colour") return "Choose your colour.";
+    if (view.category === "Position") return "Choose where it lives.";
     return `Choose your ${view.category.toLowerCase()}.`;
   }
   if (view.kind === "materialGroup")
@@ -71,6 +88,10 @@ export interface DyneStudioProps {
   desktopSettings?: AirPointHudSettings | null;
   hostConnected?: boolean;
   settingsSynced?: boolean;
+  /** Island position persisted by the engine (shared with the desktop overlay). */
+  islandPosition?: DyneIslandPosition;
+  /** The look currently applied to the live island; Studio capsules are previews until applied. */
+  appliedAppearance?: DyneAppearance | null;
 }
 
 export function DyneStudio({
@@ -79,6 +100,8 @@ export function DyneStudio({
   desktopSettings,
   hostConnected = false,
   settingsSynced = false,
+  islandPosition,
+  appliedAppearance = null,
 }: DyneStudioProps = {}) {
   // Per-capsule settings store (preview-only, persists across switches, never sent to native writer)
   const [capsulesSettings, setCapsulesSettings] = useState<Record<string, Settings>>(() => {
@@ -188,6 +211,32 @@ export function DyneStudio({
   const activeCompletionDuration =
     localCompletionDuration ?? desktopSettings?.completionDurationS ?? 2;
   const activeHudDuration = localHudDuration ?? desktopSettings?.hudDurationS ?? 120;
+
+  // Live-look controls: a capsule look is a preview until explicitly applied.
+  const canWriteLook = Boolean(hostAdapter?.setIslandAppearance) && settingsSynced && hostConnected;
+  const canWritePosition = Boolean(hostAdapter?.setIslandPosition) && settingsSynced && hostConnected;
+  const isLookApplied = appearanceEquals(settings, appliedAppearance);
+  const [lookStatus, setLookStatus] = useState<"idle" | "applying" | "applied" | "rejected">("idle");
+
+  const applyLook = useCallback(async () => {
+    if (!hostAdapter?.setIslandAppearance || !canWriteLook) return;
+    setLookStatus("applying");
+    try {
+      const ok = await hostAdapter.setIslandAppearance({ ...settings, customRgb: { ...settings.customRgb } });
+      setLookStatus(ok ? "applied" : "rejected");
+    } catch {
+      setLookStatus("rejected");
+    }
+  }, [hostAdapter, canWriteLook, settings]);
+
+  const loadAppliedLook = useCallback(() => {
+    if (!appliedAppearance) return;
+    setCapsulesSettings((prev) => ({
+      ...prev,
+      [activeCapsule.id]: { ...appliedAppearance, customRgb: { ...appliedAppearance.customRgb } },
+    }));
+    setLookStatus("idle");
+  }, [appliedAppearance, activeCapsule.id]);
 
   const change = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setCapsulesSettings((prev) => {
@@ -423,6 +472,7 @@ export function DyneStudio({
           ["Notifications", Zap],
           ["Behaviour & Timing", Clock3],
           ["Shape", Hexagon],
+          ["Position", Move],
         ] as const
       ).map(([label, icon]) => ({
         label,
@@ -507,6 +557,18 @@ export function DyneStudio({
             onSelect: () => adjust("Roundness", "Shape"),
           },
         ];
+      }
+
+      if (targetView.category === "Position") {
+        return DYNE_ISLAND_POSITIONS.map((pos) => ({
+          label: POSITION_LABELS[pos],
+          icon: Move,
+          selected: (islandPosition ?? "top-center") === pos,
+          disabled: !canWritePosition,
+          onSelect: () => {
+            if (hostAdapter?.setIslandPosition && canWritePosition) void hostAdapter.setIslandPosition(pos);
+          },
+        }));
       }
 
       if (targetView.category === "Notifications") {
@@ -900,6 +962,55 @@ export function DyneStudio({
                   )}
                 </div>
               )}
+
+            {activeView.kind !== "rest" && (
+              <div
+                className="dyne-live-look-row flex flex-wrap items-center justify-center gap-2 mt-3 text-[11px] font-mono"
+                data-testid="dyne-live-look-row"
+              >
+                <span
+                  data-testid="dyne-look-status"
+                  className={`px-2 py-0.5 rounded-full border ${
+                    isLookApplied
+                      ? "border-emerald-500/40 text-emerald-400"
+                      : "border-amber-500/40 text-amber-400"
+                  }`}
+                >
+                  {isLookApplied ? "THIS LOOK IS LIVE" : "PREVIEW · NOT APPLIED"}
+                </span>
+                <button
+                  type="button"
+                  data-testid="dyne-apply-look"
+                  className="btn text-[11px] py-1 px-2.5 inline-flex items-center gap-1.5"
+                  disabled={!canWriteLook || isLookApplied || lookStatus === "applying"}
+                  onClick={() => void applyLook()}
+                  title={
+                    canWriteLook
+                      ? "Persist this capsule look for the live island and the desktop capsule accent"
+                      : "Connect the engine to apply a look"
+                  }
+                >
+                  <Check size={12} />
+                  <span>{lookStatus === "applying" ? "Applying…" : "Apply this look"}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="dyne-load-live-look"
+                  className="btn text-[11px] py-1 px-2.5 inline-flex items-center gap-1.5"
+                  disabled={!appliedAppearance || isLookApplied}
+                  onClick={loadAppliedLook}
+                  title="Copy the live island look into this preview capsule"
+                >
+                  <Download size={12} />
+                  <span>Load live look</span>
+                </button>
+                {lookStatus === "rejected" && (
+                  <span role="alert" className="text-rose-400">
+                    The engine rejected the look; nothing was changed.
+                  </span>
+                )}
+              </div>
+            )}
 
             {activeView.kind !== "rest" && (
               <div className="stage-bottomline">

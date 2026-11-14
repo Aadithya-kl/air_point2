@@ -229,8 +229,15 @@ class TestLeftHandDragReliability(unittest.TestCase):
         self.assertEqual(self.orchestrator._pointer_owner, PointerOwner.LEFT)
         self.assertTrue(self.actuator.is_dragging)
 
-    def test_intentional_open_palm_drops_file_immediately(self):
-        """Opening hand into open palm drops file cleanly on frame 1."""
+    def test_intentional_open_palm_drops_file_after_release_dwell(self):
+        """
+        Opening the hand into an open palm drops the file exactly once.
+
+        P0 contract: the first open frame enters RELEASE_PENDING (no native UP);
+        the drop is issued once the palm stays open for release_dwell_s (80 ms).
+        The pre-P0 "drop on frame 1" expectation is obsolete because a single
+        noisy frame must never release a held object.
+        """
         t = 500.0
         h = HandsResult(left=self._make_left_hand(0.40, 0.40, pinch_norm=0.35))
         self._process(h, t)
@@ -238,11 +245,23 @@ class TestLeftHandDragReliability(unittest.TestCase):
         self._process(h, t)
         self.assertTrue(self.actuator.is_dragging)
 
-        # Intentional drop: open palm
+        # Intentional drop: open palm -> release pending, still held
         t += 0.033
         open_h = HandsResult(left=self._make_left_hand(0.40, 0.40, open_palm=True))
         self._process(open_h, t)
+        self.assertTrue(self.actuator.is_dragging, "First open frame must only arm the release")
+        self.assertEqual(self.actuator.drops, 0)
+
+        # Palm stays open past the dwell -> exactly one drop
+        t += 0.100
+        self._process(open_h, t)
         self.assertFalse(self.actuator.is_dragging)
+        self.assertEqual(self.actuator.drops, 1)
+
+        # Remaining open frames never emit a second drop
+        for _ in range(3):
+            t += 0.033
+            self._process(open_h, t)
         self.assertEqual(self.actuator.drops, 1)
 
 

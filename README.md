@@ -24,7 +24,7 @@ AirPoint/
 │   ├── models/                    # MediaPipe Task Bundles (.task)
 │   │   ├── hand_landmarker.task   # Hand tracking model
 │   │   └── face_landmarker.task   # Face tracking model
-│   ├── test_*.py                  # Complete Python test suite (224 unit & regression tests)
+│   ├── test_*.py                  # Complete Python test suite (420 unit & regression tests)
 │   ├── config.py                  # Authoritative system configuration & thresholds
 │   ├── main.py                    # Gesture engine entrypoint
 │   ├── settings.json              # User settings & gesture toggles
@@ -34,7 +34,7 @@ AirPoint/
 │   ├── src/                       # TypeScript / React application source
 │   │   ├── components/            # UI components (Nothing Glass cards, video players, HUD)
 │   │   ├── routes/                # TanStack Start file-based routing
-│   │   └── test/                  # Vitest suite (48 tests across 7 test files)
+│   │   └── test/                  # Vitest suite (135 tests across 14 test files)
 │   ├── public/                    # Static assets & web-accessible gesture tutorials
 │   │   ├── assets/gestures/       # Mute tutorial GIF & poster
 │   │   └── videos/gestures/       # 7 gesture tutorial MP4 videos & posters
@@ -59,9 +59,11 @@ AirPoint/
 │   └── AIR_POINT_WORKSPACE_MIGRATION_REPORT.md
 │
 ├── scripts/                       # PowerShell Automation Scripts
-│   ├── start_airpoint.ps1         # Launches backend + frontend with PID tracking
-│   ├── stop_airpoint.ps1          # Gracefully terminates all services & cleans tokens
+│   ├── start_airpoint.ps1         # Unified launcher: prerequisites, ports, health, PID record, logs
+│   ├── stop_airpoint.ps1          # Graceful engine exit via the bridge; stops own processes only
 │   └── run_checks.ps1             # Full-stack verification test runner (4 gates)
+├── tools/physical_sandbox/        # Disposable Explorer sandbox for physical drag tests (manifest + verify + reset)
+├── docs/legacy_p0_2/              # Historical P0.2 reports migrated from the legacy checkout
 │
 ├── .gitignore                     # Workspace-level Git ignore rules
 └── README.md                      # This documentation
@@ -106,25 +108,31 @@ AirPoint/
 
 ## 3. Running Air Point
 
-### Option A: Using the Automated PowerShell Launcher (Recommended)
-From the `AirPoint` root directory:
+### Option A: Using the Unified PowerShell Launcher (Recommended)
+From the repository root:
 ```powershell
-# Start both Python backend and React frontend
-.\scripts\start_airpoint.ps1
+# Start the Python engine and the React Control Center, verify both, record their PIDs
+.\scripts\start_airpoint.ps1 -Mode full
 
-# Start in control-server-only mode (lightweight bridge + frontend)
-.\scripts\start_airpoint.ps1 -Mode control-server
+# Same, with the OpenCV debug HUD (drag diagnostics) enabled
+.\scripts\start_airpoint.ps1 -Mode full -DebugHud
 
-# Start only the frontend or only the backend
+# Check prerequisites, ports and the exact commands without starting anything
+.\scripts\start_airpoint.ps1 -Mode full -DryRun
+
+# Other modes
+.\scripts\start_airpoint.ps1 -Mode control-server   # bridge only + Control Center
 .\scripts\start_airpoint.ps1 -Mode frontend-only
 .\scripts\start_airpoint.ps1 -Mode backend-only
 ```
-Once started, open your browser at **`http://localhost:8080`**.
+The launcher resolves the repository root from its own location, requires `backend\.venv`, checks Python imports, model bundles, Node, npm and `node_modules`, refuses busy ports (reporting the owner) and a second instance, waits for the bridge (`backend\bridge_info.json` + `GET /api/status`) and for the dev server (HTTP 200), passes the discovered bridge URL to the Control Center (`VITE_AIRPOINT_BRIDGE_URL`), and writes `.airpoint\airpoint_pids.json` plus `logs\backend_*.log` / `logs\frontend_*.log`. If one service fails, whatever was already started is stopped again. Once started, open **`http://localhost:8080`**.
 
-To cleanly stop all Air Point services and clean up bridge tokens:
+To stop Air Point (graceful engine exit through the authenticated bridge, then only the processes the launcher started):
 ```powershell
 .\scripts\stop_airpoint.ps1
+# add -IncludeOrphans to also stop AirPoint processes started by hand from this repository
 ```
+The stop script never terminates unrelated `python.exe` or `node.exe` processes.
 
 ### Option B: Manual Execution
 
@@ -152,16 +160,19 @@ To run the complete full-stack verification suite in one command:
 ```
 
 This executes 4 automated gates:
-1. **Python Unit Tests:** 224 unit tests covering gesture detection, filters, actuators, audio controls, and the HTTP bridge.
+1. **Python Unit Tests:** 471 unit tests covering gesture detection, filters, actuators, drag reliability, audio controls, the Dyne event system and the HTTP bridge. They run with the OS-action guard enabled (`AIRPOINT_ENABLE_TEST_GUARD=1`), which blocks real mouse/keyboard injection, workstation lock, application launches and camera opens.
 2. **Frontend TypeScript Check:** `npx tsc --noEmit` verifies strict types across all routes and components.
-3. **Frontend Vitest Suite:** 48 unit tests verifying gesture video players, recent activity feeds, theme providers, and engine context.
+3. **Frontend Vitest Suite:** 144 unit tests verifying gesture video players, recent activity feeds, theme providers, Dyne Studio, the live Dyne island and engine context.
 4. **Frontend Production Build:** `npm run build` compiles client and server Nitro bundles.
 
 ### Running Gates Individually:
 - **Python Tests:**
   ```powershell
   cd AirPoint\backend
-  .\.venv\Scripts\python.exe -m unittest discover -p "test_*.py"
+  $env:AIRPOINT_SETTINGS_PATH = ":memory:"
+  $env:AIRPOINT_ENABLE_TEST_GUARD = "1"
+  $env:AIRPOINT_DISABLE_REAL_LOCK = "1"
+  .\.venv\Scripts\python.exe -m unittest discover -s . -p "test_*.py"
   ```
 - **TypeScript Typecheck:**
   ```powershell
@@ -187,18 +198,20 @@ The React Control Center communicates with the Python engine over a local HTTP R
 - **Ephemeral Token Authentication:** The Python server generates a cryptographic 32-byte hex token upon startup, persisted to `backend/.bridge_token` and `backend/bridge_info.json`. Mutating requests require the matching `X-AirPoint-Token` header.
 - **Constant-Time Comparison:** All token comparisons use `secrets.compare_digest` to prevent timing attacks.
 - **Origin & Host Protection:** The server rejects any HTTP request whose `Host` or `Origin` header points outside `localhost` or `127.0.0.1`.
-- **Dynamic Port Negotiation:** If the default port (8765) is bound, the server dynamically binds to a free loopback port and writes the assigned port to `bridge_info.json`. The React frontend reads this file to connect seamlessly.
-- **Drag Safety Watchdog:** A background safety thread monitors active mouse drag operations and automatically releases the left mouse button if hand tracking is lost for >0.25 seconds, preventing cursor lockup.
+- **Port Handling:** The engine binds `127.0.0.1:8765` and refuses to start if the port is taken (set `AIRPOINT_PORT_FALLBACK=1`, or pass `-AllowPortFallback` to the launcher, to bind a free loopback port instead; the assigned port is written to `bridge_info.json`). The launcher reads that file and passes the bridge origin to the Control Center as `VITE_AIRPOINT_BRIDGE_URL`; only loopback `http://` origins are accepted, anything else falls back to `http://127.0.0.1:8765`. A dev server started by hand without the variable uses the default port.
+- **Events:** every notification is one Dyne event (`backend/core/events.py`) with an id, a session token, a type, a priority and a duration; `GET /api/events` streams them with `id:` lines (reconnecting clients send `Last-Event-ID` and missed events are replayed), `GET /api/events/history` returns the bounded ring, and the same events drive the desktop capsule and the Control Center's live island.
+- **Drag Safety:** A held left button is released when the left hand is lost for more than 0.15 s, and by the gesture loop's watchdog if the drag controller stops refreshing it for 0.25 s. Native input results are reported as CONFIRMED / UNCONFIRMED / FAILED; a release that cannot be confirmed is retried (bounded) on pause and shutdown and surfaced in `GET /api/status` under `drag`, never reported as success.
 
 ---
 
 ## 6. Troubleshooting
 
 - **Port 8080 or 8765 Already in Use:**
-  Run `.\scripts\stop_airpoint.ps1` to terminate lingering processes. You can also inspect occupying PIDs with:
+  The launcher names the owning process. If it is an AirPoint process from this repository run `.\scripts\stop_airpoint.ps1 -IncludeOrphans`; otherwise free the port or pass `-FrontendPort` / `-BackendPort`. You can also inspect occupying PIDs with:
   ```powershell
   Get-NetTCPConnection -LocalPort 8080, 8765 -State Listen
   ```
+- **Launcher says the backend did not answer:** read the newest `logs\backend_*.err.log`; the usual causes are a missing camera, a missing model bundle, or a port collision (the launcher checks the port first, but another process may have taken it in between).
 - **MediaPipe Model Not Found:**
   In `AirPoint\backend\config.py`, all model paths resolve dynamically using `Path(__file__).resolve().parent`. Ensure `backend\models\hand_landmarker.task` and `backend\models\face_landmarker.task` are present.
 - **Audio Gesture Warnings (pycaw):**

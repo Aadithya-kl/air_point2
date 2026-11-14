@@ -24,14 +24,28 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 try:
     import cv2
 except ImportError:
     cv2 = None
 
+from core.events import (
+    DEFAULT_ISLAND_APPEARANCE,
+    DEFAULT_ISLAND_POSITION,
+    ISLAND_POSITIONS,
+    DyneEvent,
+    EventDispatcher,
+    sanitize_island_appearance,
+    sanitize_island_position,
+)
+
 logger = logging.getLogger(__name__)
+
+# Events kept in /api/status (the full ring is served by /api/events/history).
+STATUS_EVENT_COUNT = 10
+EVENT_HISTORY_LIMIT = 50
 
 # Valid settings boundaries
 MIN_HOLD_S = 1.0
@@ -123,6 +137,20 @@ def clamp_val(val: float, min_val: float, max_val: float) -> float:
     return max(min_val, min(max_val, float(val)))
 
 
+def _parse_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _sse_block(event_dict: dict[str, Any]) -> bytes:
+    """One SSE message: id line + JSON data line (default 'message' event)."""
+    return f"id: {event_dict['id']}\ndata: {json.dumps(event_dict)}\n\n".encode("utf-8")
+
+
 class RuntimeState:
     """Thread-safe state snapshot shared between Air Point engine and Control Server."""
 
@@ -136,8 +164,21 @@ class RuntimeState:
         self.volume: int = 50
         self.muted: bool = False
         self.active_gesture: str = "idle"
-        self.recent_events: list[dict[str, str]] = []
-        
+        # Unified Dyne event system: one dispatcher feeds the SSE stream, the
+        # status snapshot and (via main.py) the Tk desktop overlay.
+        self.events = EventDispatcher(history_limit=EVENT_HISTORY_LIMIT)
+        self.recent_events: list[dict[str, Any]] = []
+        self.events.subscribe(self._on_dyne_event)
+
+        # Drag fault observability (Phase 1): the logical drag flag, the drag
+        # controller state, the last native input error and the OS-reported
+        # button state are published separately so that none of them can be
+        # mistaken for proof of a completed drag.
+        self.drag_state: str = "READY"
+        self.drag_logical: bool = False
+        self.drag_error: str | None = None
+        self.native_button: str = "UNKNOWN"
+
         # Spatial landmarks snapshot & frame provider
         self._landmarks: dict[str, Any] = {
             "timestamp": 0.0,
@@ -156,9 +197,9 @@ class RuntimeState:
         self.hold_duration: float = DEFAULT_HOLD_S
         self.sensitivity: float = DEFAULT_SENSITIVITY
         self.smoothing: int = DEFAULT_SMOOTHING
-        self.enabled_gestures: dict[str, bool] = {
-            g: (False if g == "wakanda-forever" else True) for g in SUPPORTED_GESTURES
-        }
+        # All gestures, including the Wakanda Forever lock, are on by default; a
+        # persisted settings.json or a Control Center toggle can turn any of them off.
+        self.enabled_gestures: dict[str, bool] = {g: True for g in SUPPORTED_GESTURES}
         self.power_save: bool = False
         self.power_state: str = "NORMAL"
         self.island_enabled: bool = True
@@ -167,15 +208,20 @@ class RuntimeState:
         self.island_autohide_enabled: bool = True
         self.island_hud_duration_s: float = DEFAULT_ISLAND_HUD_DURATION_S
         self.island_completion_duration_s: float = DEFAULT_ISLAND_COMPLETION_DURATION_S
+        # Dyne position and appearance are persisted so the Tk overlay and the
+        # React island use the same choices after a restart.
+        self.island_position: str = DEFAULT_ISLAND_POSITION
+        self.island_appearance: dict[str, Any] = sanitize_island_appearance(DEFAULT_ISLAND_APPEARANCE)
         if self.settings_path:
             self._load_persisted_settings()
 
-        # SSE listeners: list of response writers / queues
-        self._listeners: list[Callable[[str], None]] = []
+        # SSE listeners: called with each DyneEvent (outside the state lock)
+        self._listeners: list[Callable[[DyneEvent], None]] = []
         self._pause_toggle_cb: Callable[[], bool] | None = None
         self._stop_cb: Callable[[], bool] | None = None
         self._start_cb: Callable[[], bool] | None = None
         self._settings_change_cb: Callable[[dict[str, Any]], None] | None = None
+        self._exit_cb: Callable[[], bool] | None = None
 
     def _load_persisted_settings(self) -> None:
         if not self.settings_path or not os.path.exists(self.settings_path):
@@ -207,6 +253,10 @@ class RuntimeState:
                 self.island_hud_duration_s = clamp_val(data["island_hud_duration_s"], MIN_ISLAND_HUD_DURATION_S, MAX_ISLAND_HUD_DURATION_S)
             if "island_completion_duration_s" in data and isinstance(data["island_completion_duration_s"], (int, float)):
                 self.island_completion_duration_s = clamp_val(data["island_completion_duration_s"], MIN_ISLAND_COMPLETION_DURATION_S, MAX_ISLAND_COMPLETION_DURATION_S)
+            if "island_position" in data:
+                self.island_position = sanitize_island_position(data["island_position"])
+            if "island_appearance" in data and isinstance(data["island_appearance"], dict):
+                self.island_appearance = sanitize_island_appearance(data["island_appearance"])
         except Exception as e:
             logger.warning("Could not load %s: %s", self.settings_path, e)
 
@@ -230,6 +280,8 @@ class RuntimeState:
                     "island_autohide_enabled": self.island_autohide_enabled,
                     "island_hud_duration_s": self.island_hud_duration_s,
                     "island_completion_duration_s": self.island_completion_duration_s,
+                    "island_position": self.island_position,
+                    "island_appearance": self.island_appearance,
                 }, f, indent=2)
         except Exception as e:
             logger.warning("Could not persist %s: %s", self.settings_path, e)
@@ -244,6 +296,10 @@ class RuntimeState:
         muted: bool,
         active_gesture: str = "idle",
         power_state: str = "NORMAL",
+        drag_state: str = "READY",
+        drag_logical: bool = False,
+        drag_error: str | None = None,
+        native_button: str = "UNKNOWN",
     ) -> None:
         with self._lock:
             self.running = running
@@ -254,30 +310,65 @@ class RuntimeState:
             self.muted = muted
             self.active_gesture = active_gesture
             self.power_state = power_state
+            self.drag_state = str(drag_state)
+            self.drag_logical = bool(drag_logical)
+            self.drag_error = str(drag_error) if drag_error else None
+            self.native_button = str(native_button)
+
+    def publish_event(
+        self,
+        event_type: str,
+        message: str | None = None,
+        **kwargs: Any,
+    ) -> DyneEvent:
+        """Publishes a catalogued Dyne event (see core/events.py) to every subscriber."""
+        return self.events.publish(event_type, message, **kwargs)
 
     def add_event(self, action: str, event_type: str = "general") -> None:
-        ts = time.strftime("%H:%M:%S")
-        event_obj = {"time": ts, "action": action, "type": event_type}
+        """
+        Legacy producer kept for older callers: the free-form `event_type` becomes
+        the event's type/kind and `action` its title and message. New code uses
+        publish_event() with a catalogued type.
+        """
+        self.events.publish(event_type, action, title=action, kind=event_type, source="legacy")
+
+    def _on_dyne_event(self, event: DyneEvent) -> None:
+        """Dispatcher subscriber: mirror into the status ring and fan out to SSE clients."""
+        event_dict = event.to_dict()
+        # Older consumers read "type" as the legacy short kind; the catalogued type
+        # is also exposed under "type" when no legacy kind exists for it.
+        event_dict["type"] = event.kind or event.type
+        event_dict["event_type"] = event.type
         with self._lock:
-            self.recent_events = [event_obj] + self.recent_events[:4]
+            self.recent_events = [event_dict] + self.recent_events[:EVENT_HISTORY_LIMIT - 1]
             listeners_snapshot = list(self._listeners)
 
-        # Notify SSE clients outside lock
-        payload = json.dumps({"event": event_type, "action": action, "time": ts})
+        # Notify SSE clients outside the lock
         for listener in listeners_snapshot:
             try:
-                listener(payload)
+                listener(event)
             except Exception:
                 pass
 
-    def register_listener(self, listener: Callable[[str], None]) -> None:
+    def register_listener(self, listener: Callable[[DyneEvent], None]) -> None:
         with self._lock:
             self._listeners.append(listener)
 
-    def unregister_listener(self, listener: Callable[[str], None]) -> None:
+    def unregister_listener(self, listener: Callable[[DyneEvent], None]) -> None:
         with self._lock:
             if listener in self._listeners:
                 self._listeners.remove(listener)
+
+    def event_history(self, after_id: int | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """Bounded event ring in ascending id order, as serialisable dicts."""
+        return [self._serialize_event(ev) for ev in self.events.history(after_id=after_id, limit=limit)]
+
+    @staticmethod
+    def _serialize_event(event: DyneEvent) -> dict[str, Any]:
+        data = event.to_dict()
+        data["type"] = event.kind or event.type
+        data["event_type"] = event.type
+        return data
 
     def get_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -290,6 +381,12 @@ class RuntimeState:
                 "muted": self.muted,
                 "active_gesture": self.active_gesture,
                 "power_state": self.power_state,
+                "drag": {
+                    "state": self.drag_state,
+                    "logical_held": self.drag_logical,
+                    "native_button": self.native_button,
+                    "last_error": self.drag_error,
+                },
                 "settings": {
                     "hold": self.hold_duration,
                     "sensitivity": self.sensitivity,
@@ -302,8 +399,12 @@ class RuntimeState:
                     "island_autohide_enabled": self.island_autohide_enabled,
                     "island_hud_duration_s": self.island_hud_duration_s,
                     "island_completion_duration_s": self.island_completion_duration_s,
+                    "island_position": self.island_position,
+                    "island_appearance": dict(self.island_appearance),
                 },
-                "events": list(self.recent_events),
+                "events": list(self.recent_events[:STATUS_EVENT_COUNT]),
+                "event_session": self.events.session_id,
+                "last_event_id": self.events.last_id,
             }
 
     def update_landmarks(
@@ -395,6 +496,12 @@ class RuntimeState:
                 self.island_hud_duration_s = clamp_val(updates["island_hud_duration_s"], MIN_ISLAND_HUD_DURATION_S, MAX_ISLAND_HUD_DURATION_S)
             if "island_completion_duration_s" in updates and isinstance(updates["island_completion_duration_s"], (int, float)):
                 self.island_completion_duration_s = clamp_val(updates["island_completion_duration_s"], MIN_ISLAND_COMPLETION_DURATION_S, MAX_ISLAND_COMPLETION_DURATION_S)
+            if "island_position" in updates and isinstance(updates["island_position"], str):
+                candidate = updates["island_position"].strip().lower()
+                if candidate in ISLAND_POSITIONS:
+                    self.island_position = candidate  # unknown positions are ignored, never persisted
+            if "island_appearance" in updates and isinstance(updates["island_appearance"], dict):
+                self.island_appearance = sanitize_island_appearance(updates["island_appearance"], base=self.island_appearance)
             self.persist_settings()
             snapshot = {
                 "hold": self.hold_duration,
@@ -408,6 +515,8 @@ class RuntimeState:
                 "island_autohide_enabled": self.island_autohide_enabled,
                 "island_hud_duration_s": self.island_hud_duration_s,
                 "island_completion_duration_s": self.island_completion_duration_s,
+                "island_position": self.island_position,
+                "island_appearance": dict(self.island_appearance),
             }
             cb = self._settings_change_cb
 
@@ -431,6 +540,25 @@ class RuntimeState:
 
     def set_settings_change_cb(self, cb: Callable[[dict[str, Any]], None]) -> None:
         self._settings_change_cb = cb
+
+    def set_exit_cb(self, cb: Callable[[], bool] | None) -> None:
+        """
+        Registers the engine's graceful-exit request handler. The callback only
+        raises a flag that the engine main loop consumes; the main loop then
+        performs the normal shutdown (drag release, Windows settings restore),
+        so no native input is ever injected from the HTTP thread.
+        """
+        self._exit_cb = cb
+
+    def request_exit(self) -> bool:
+        cb = self._exit_cb
+        if not cb:
+            return False
+        try:
+            return bool(cb())
+        except Exception as e:
+            logger.error("Error invoking exit callback: %s", e)
+            return False
 
     def set_test_countdown_cb(self, cb: Callable[[float], Any] | None) -> None:
         self._test_countdown_cb = cb
@@ -583,8 +711,37 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(payload)
 
+        elif path == "/api/events/history":
+            # Bounded event ring (ascending ids). ?after=<id> returns only newer
+            # events, which is how a reconnecting client fills a gap.
+            params = parse_qs(parsed_url.query)
+            after_id = _parse_int(params.get("after", [None])[0])
+            limit = _parse_int(params.get("limit", [None])[0])
+            if limit is None or limit <= 0 or limit > EVENT_HISTORY_LIMIT:
+                limit = EVENT_HISTORY_LIMIT
+            data = {
+                "session": self.state.events.session_id,
+                "last_event_id": self.state.events.last_id,
+                "events": self.state.event_history(after_id=after_id, limit=limit),
+            }
+            payload = json.dumps(data).encode("utf-8")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", "no-cache")
+            self._send_cors_headers(origin)
+            self.end_headers()
+            self.wfile.write(payload)
+
         elif path == "/api/events":
-            # Server-Sent Events stream
+            # Server-Sent Events stream. Every event carries an `id:` line so the
+            # browser EventSource resends it as Last-Event-ID on reconnect and the
+            # missed events (still in the ring) are replayed before live ones.
+            params = parse_qs(parsed_url.query)
+            resume_after = _parse_int(self.headers.get("Last-Event-ID"))
+            if resume_after is None:
+                resume_after = _parse_int(params.get("after", [None])[0])
+
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -592,35 +749,47 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             self._send_cors_headers(origin)
             self.end_headers()
 
-            # Push initial hello
-            init_msg = f": connected\ndata: {json.dumps({'event': 'connected', 'status': 'ok'})}\n\n".encode("utf-8")
-            try:
-                self.wfile.write(init_msg)
-                self.wfile.flush()
-            except Exception:
-                return
+            client_queue: queue.Queue[DyneEvent] = queue.Queue(maxsize=100)
 
-            client_queue: queue.Queue[str] = queue.Queue(maxsize=100)
-
-            def queue_event(msg_str: str) -> None:
+            def queue_event(event: DyneEvent) -> None:
                 try:
-                    client_queue.put_nowait(msg_str)
+                    client_queue.put_nowait(event)
                 except queue.Full:
                     pass
 
+            # Register before replaying so nothing published in between is lost;
+            # duplicates (same id) are filtered below.
             self.state.register_listener(queue_event)
+            last_sent_id = resume_after if resume_after is not None else 0
             try:
+                hello = {
+                    "event": "connected",
+                    "status": "ok",
+                    "session": self.state.events.session_id,
+                    "last_event_id": self.state.events.last_id,
+                }
+                self.wfile.write(f": connected\ndata: {json.dumps(hello)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+
+                if resume_after is not None:
+                    for ev in self.state.events.history(after_id=resume_after):
+                        self.wfile.write(_sse_block(self.state._serialize_event(ev)))
+                        last_sent_id = max(last_sent_id, ev.id)
+                    self.wfile.flush()
+
                 while self.control_server and self.control_server.is_active:
                     try:
                         item = client_queue.get(timeout=10.0)
-                        msg = f"data: {item}\n\n".encode("utf-8")
-                        self.wfile.write(msg)
+                        if item.id <= last_sent_id and item.session == self.state.events.session_id:
+                            continue  # already replayed from history
+                        self.wfile.write(_sse_block(self.state._serialize_event(item)))
                         self.wfile.flush()
+                        last_sent_id = max(last_sent_id, item.id)
                     except queue.Empty:
                         # Keep-alive heartbeat
                         self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            except (BrokenPipeError, ConnectionResetError, TimeoutError, ConnectionAbortedError):
                 pass
             except Exception as e:
                 logger.debug("SSE client connection closed: %s", e)
@@ -758,6 +927,20 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
                 dur = float(payload.get("duration", 5.0))
                 ok = self.state.trigger_test_countdown(dur)
                 resp = json.dumps({"status": "ok", "running": self.state.running, "action": action, "triggered": ok, "duration": dur}).encode("utf-8")
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(resp)))
+                self._send_cors_headers(origin)
+                self.end_headers()
+                self.wfile.write(resp)
+                return
+            elif action == "exit":
+                # Graceful engine exit for the launcher's stop script: the main
+                # loop ends its iteration and runs the normal shutdown path
+                # (drag release first). "accepted" is False when no engine is
+                # attached (control-server-only mode).
+                accepted = self.state.request_exit()
+                resp = json.dumps({"status": "ok", "action": "exit", "accepted": accepted}).encode("utf-8")
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(resp)))

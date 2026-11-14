@@ -274,6 +274,16 @@ class LeftDragController:
         self._raw_pinch_dist = float(dist3d(landmarks[4], landmarks[8]))
         self._norm_pinch_dist = self._raw_pinch_dist / self._palm_width
 
+        # DEBUG telemetry: continuous pinch distance and state (no INFO-level per-frame logging)
+        logger.debug(
+            "Drag telemetry: state=%s norm_pinch=%.4f raw_pinch=%.4f palm=%.4f dragging=%s",
+            self._state.value,
+            self._norm_pinch_dist,
+            self._raw_pinch_dist,
+            self._palm_width,
+            getattr(self._actuator, "is_dragging", False),
+        )
+
         # Keep active drag session alive in actuator watchdog
         if self._state in (DragLockState.GRAB_LOCKED, DragLockState.RELEASE_PENDING):
             if hasattr(self._actuator, "keep_drag_alive"):
@@ -351,16 +361,11 @@ class LeftDragController:
                         )
 
         elif self._state == DragLockState.GRAB_LOCKED:
-            # Clear release threshold (immediate unpinch without debounce)
-            if self._norm_pinch_dist >= self.clear_release_norm_dist:
-                logger.info(
-                    "DragLockState transition: GRAB_LOCKED -> deliberate clear unpinch (d=%.3f >= %.2f)",
-                    self._norm_pinch_dist,
-                    self.clear_release_norm_dist,
-                )
-                self._execute_drop(now, reason="UNPINCH")
-            elif self._norm_pinch_dist > rel_th:
-                # Entering release hysteresis band: start release debounce dwell
+            # Any pinch above release threshold enters release debounce.
+            # A single noisy frame at clear_release_norm_dist does NOT cause
+            # an immediate drop - release requires sustained time in
+            # RELEASE_PENDING (see below).
+            if self._norm_pinch_dist >= rel_th:
                 self._state = DragLockState.RELEASE_PENDING
                 self._release_pending_start_time = now
                 logger.info(
@@ -385,10 +390,7 @@ class LeftDragController:
                     if self._release_pending_start_time
                     else 0.0
                 )
-                if (
-                    elapsed_rel >= self.release_dwell_s
-                    or self._norm_pinch_dist >= self.clear_release_norm_dist
-                ):
+                if elapsed_rel >= self.release_dwell_s:
                     # Deliberate unpinch dwell satisfied -> execute native button UP
                     logger.info(
                         "DragLockState transition: RELEASE_PENDING -> deliberate unpinch (dwell=%.3fs, d=%.3f)",

@@ -1,5 +1,5 @@
 export type Category =
-  "Colour" | "Text" | "Material" | "Shape" | "Notifications" | "Behaviour & Timing";
+  "Colour" | "Text" | "Material" | "Shape" | "Notifications" | "Behaviour & Timing" | "Position";
 export type Adjustment =
   "Glass" | "Matte" | "Translucent" | "Font Size" | "Font Boldness" | "Roundness";
 export type View =

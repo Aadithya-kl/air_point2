@@ -17,7 +17,9 @@ import {
   Zap,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { bridgeHostLabel } from "@/lib/air-point-model";
 import { useAirPointEngine } from "./engine";
+import { DyneLiveIsland } from "./dyne-live-island";
 
 const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: Activity, crumb: "Overview" },
@@ -46,11 +48,21 @@ export const DesktopShell: React.FC<{ children: React.ReactNode }> = ({
     ) ?? NAV_ITEMS[0];
 
   const isLight = engine.preferences.theme === "titanium";
+  const bridgeHost = bridgeHostLabel(engine.bridgeUrl);
 
   return (
     <div className="min-h-screen text-[var(--text)] selection:bg-[var(--accent)] selection:text-white relative">
       {/* Ambient mist & atmospheric gradient overlay over mountain wallpaper */}
       <div className="wallpaper-overlay" aria-hidden="true" />
+
+      {/* Live Dyne notification island: real engine events only (never previews) */}
+      <DyneLiveIsland
+        event={engine.liveNotification}
+        appearance={engine.islandAppearance}
+        position={engine.islandPosition}
+        reducedMotion={engine.preferences.reducedMotion}
+        onDismiss={engine.dismissLiveNotification}
+      />
 
       {/* Floating macOS-Style Translucent Frosted Glass Window Shell */}
       <div className="window-shell">
@@ -70,7 +82,7 @@ export const DesktopShell: React.FC<{ children: React.ReactNode }> = ({
               <span className="dot" />
               <span id="top-status">
                 {engine.connected
-                  ? `BRIDGE ONLINE · 127.0.0.1:8765 (${engine.fps} FPS)`
+                  ? `BRIDGE ONLINE · ${bridgeHost} (${engine.fps} FPS)`
                   : "BRIDGE OFFLINE"}
               </span>
             </div>

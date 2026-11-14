@@ -129,8 +129,6 @@ class GestureOrchestrator:
                 self._left._rearm_time = None
 
     @property
-
-    @property
     def max_step_limit(self) -> float | None:
         return self._max_step_limit
 
@@ -145,6 +143,27 @@ class GestureOrchestrator:
         if hasattr(self._left, "set_smoothing"):
             self._left.set_smoothing(smoothing)
 
+    def _run_drag_watchdog(self, now: float) -> None:
+        """
+        Actuator safety watchdog, evaluated once per frame AFTER the left-hand
+        controller processed the frame.
+
+        LeftDragController refreshes the actuator heartbeat (keep_drag_alive) on
+        every frame in which it keeps the grab (GRAB_LOCKED / RELEASE_PENDING, and
+        the tracking-loss grace). Checking the watchdog after that refresh means a
+        healthy drag can never be released by a slow frame, however long the
+        camera or inference gap was; the watchdog fires only when the native
+        button is still held and nothing refreshed the heartbeat for 250 ms across
+        frames: controller desynchronised or disabled while the button is down,
+        or the Phase 1 retry of a LEFTUP that Windows did not confirm
+        (INPUT_ERROR, re-armed every 250 ms by check_drag_watchdog itself).
+        The 250 ms timeout and the actuator logic are unchanged.
+        """
+        if getattr(self._actuator, 'is_dragging', False):
+            if hasattr(self._actuator, 'check_drag_watchdog') and (self._actuator.check_drag_watchdog(now, timeout_s=0.25) is True):
+                if hasattr(self._left, 'release_drag'):
+                    self._left.release_drag(reason="WATCHDOG_TIMEOUT")
+
     def process(self, hands: HandsResult | None, face: FaceResult | None = None) -> None:
         from config import POINTER_ONLY_MODE, PINCH_CLICK_ENABLED
         now = time.perf_counter()
@@ -154,10 +173,12 @@ class GestureOrchestrator:
         if hands is None:
             hands = HandsResult()
 
-        if getattr(self._actuator, 'is_dragging', False):
-            if hasattr(self._actuator, 'check_drag_watchdog') and (self._actuator.check_drag_watchdog(now, timeout_s=0.25) is True):
-                if hasattr(self._left, 'release_drag'):
-                    self._left.release_drag(reason="WATCHDOG_TIMEOUT")
+        # The actuator watchdog is evaluated in _run_drag_watchdog() AFTER the
+        # left-hand controller has processed this frame (see below). Evaluating it
+        # here, before the controller could refresh its heartbeat, spent the 250 ms
+        # budget on the inter-frame gap: at the 5-7 FPS observed on 2026-11-02 every
+        # slow frame released a healthy GRAB_LOCKED drag and the still-pinched hand
+        # re-grabbed 100 ms later (repeated LEFTDOWN/LEFTUP pairs).
 
         screenshot_active = self._screenshot.process(hands, now)
         
@@ -169,10 +190,30 @@ class GestureOrchestrator:
             self._right.process(None)
             self._left.process(None, now)
             self._pointer_owner = PointerOwner.NONE
+            self._run_drag_watchdog(now)  # keeps the INPUT_ERROR retry alive on this path
             return
 
-        # Phase 8: Wakanda Forever crossed-arm lock gesture
-        wakanda_active = self._wakanda.process(hands, face, now)
+        # Check if an active mouse drag is in progress (computed once; protects the
+        # held object from the Wakanda and lip-mute recognisers below)
+        is_active_drag = (
+            (getattr(self._actuator, 'is_dragging', False) is True)
+            or (
+                hasattr(self._left, "drag_controller")
+                and self._left.drag_controller.is_active_or_pending
+            )
+            or getattr(self._left, 'left_drag_state', '') in ('DRAGGING', 'GRAB_LOCKED', 'GRAB_CANDIDATE', 'GRAB_PENDING')
+        )
+
+        # Phase 8: Wakanda Forever crossed-arm lock gesture.
+        # Never evaluated while a left drag is active or pending: a pinching hand
+        # with curled fingers can satisfy the relaxed fist test, and a single
+        # matching frame must not be able to release a held object.
+        if is_active_drag:
+            wakanda_active = False
+            if self._wakanda.is_holding:
+                self._wakanda.reset()
+        else:
+            wakanda_active = self._wakanda.process(hands, face, now)
         if wakanda_active:
             if hasattr(self._left, 'release_drag'):
                 self._left.release_drag(reason="WORKSTATION_LOCK")
@@ -181,6 +222,7 @@ class GestureOrchestrator:
             self._right.process(None)
             self._left.process(None, now)
             self._pointer_owner = PointerOwner.NONE
+            self._run_drag_watchdog(now)
             return
 
         # Phase 4: Two-hand W gesture to open WhatsApp Desktop
@@ -193,17 +235,8 @@ class GestureOrchestrator:
             self._right.process(None)
             self._left.process(None, now)
             self._pointer_owner = PointerOwner.NONE
+            self._run_drag_watchdog(now)
             return
-
-        # Check if an active mouse drag is in progress
-        is_active_drag = (
-            (getattr(self._actuator, 'is_dragging', False) is True)
-            or (
-                hasattr(self._left, "drag_controller")
-                and self._left.drag_controller.is_active_or_pending
-            )
-            or getattr(self._left, 'left_drag_state', '') in ('DRAGGING', 'GRAB_LOCKED', 'GRAB_CANDIDATE', 'GRAB_PENDING')
-        )
 
         # Phase 5: Lip-touch audio mute / restore (protected: never interrupts active drag)
         if not is_active_drag:
@@ -214,6 +247,7 @@ class GestureOrchestrator:
                 self._right.process(None)
                 self._left.process(None)
                 self._pointer_owner = PointerOwner.NONE
+                self._run_drag_watchdog(now)
                 return
         else:
             if self._lip_gesture.state != LipMuteState.IDLE:
@@ -252,6 +286,7 @@ class GestureOrchestrator:
                     self._actuator.move(self._last_cursor_pos[0], self._last_cursor_pos[1])
                 self._pointer_owner = PointerOwner.NONE
                 self._was_ear_active = True
+                self._run_drag_watchdog(now)
                 return
         else:
             if hands.left is not None and self.drag_enabled:
@@ -308,6 +343,9 @@ class GestureOrchestrator:
                     self._right_last_valid_time = None
                     self._right._is_in_dropout_grace = False
                     self._right.process(None)
+
+        # Watchdog after the controller had its chance to refresh the heartbeat.
+        self._run_drag_watchdog(now)
 
         if hands.left is not None and hands.right is not None:
             self._two.process(hands.left, hands.right)

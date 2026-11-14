@@ -47,6 +47,7 @@ from core.gestures import GestureOrchestrator
 from core.actuator import MouseActuator
 from core.display import build_virtual_desktop, build_trackpad_zone
 from core.control_server import ControlServer
+from core.events import DragEventTracker, VolumeEventCoalescer
 from config import SCREENSHOT_OVERLAY_ENABLED, SCREENSHOT_OVERLAY_POSITION
 
 if SCREENSHOT_OVERLAY_ENABLED:
@@ -54,8 +55,20 @@ if SCREENSHOT_OVERLAY_ENABLED:
 else:
     ScreenshotOverlay = None
 
-if DEBUG_GESTURES:
+# Debug HUD renderer. The debug window has three independent switches:
+# config.DEBUG_GESTURES, the --debug command-line flag, and Ctrl+Alt+D (or the
+# 'd' key in the window) at runtime. Importing the renderer only when
+# DEBUG_GESTURES was True left the name unbound for the other two switches and
+# the first debug frame raised NameError. core.debug_overlay needs only cv2,
+# numpy, config and core.tracker, all imported above, so normal mode pays
+# nothing for the unconditional import. If the import fails, the HUD is
+# disabled with an explicit diagnostic instead of crashing the engine.
+try:
     from core.debug_overlay import draw_debug_frame
+    DEBUG_HUD_IMPORT_ERROR: str | None = None
+except Exception as _debug_hud_exc:  # any import failure must be reported, not raised
+    draw_debug_frame = None  # type: ignore[assignment]
+    DEBUG_HUD_IMPORT_ERROR = f"{type(_debug_hud_exc).__name__}: {_debug_hud_exc}"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -185,9 +198,16 @@ def extract_hand_measurements(
 
 def run() -> None:
     original_settings: dict = {}
+    actuator: MouseActuator | None = None
 
     def _emergency_restore():
         """atexit safety net — runs even on unhandled exceptions."""
+        # Native input safety first: never leave the left button held.
+        if actuator is not None and getattr(actuator, 'is_dragging', False):
+            try:
+                actuator.force_release_drag(context="ATEXIT")
+            except Exception as e:
+                logger.critical("ATEXIT drag release raised: %s", e)
         if original_settings:
             _restore_windows_settings(original_settings)
 
@@ -218,13 +238,29 @@ def run() -> None:
     hand_missing_since = None
     hand_present_since = None
 
+    # Set from any thread (hotkey listener, HTTP handlers); consumed on the main
+    # loop thread so the native button release never races the gesture pipeline.
+    pause_release_pending = False
+
+    # Bound before the hotkey listener starts so an early Ctrl+Alt+P cannot hit
+    # an unassigned closure variable; both are (re)assigned once the engine and
+    # the control bridge exist.
+    overlay = None
+    bridge_state = None
+
     def on_activate_pause():
-        nonlocal is_paused, is_tracking_active, hand_missing_since, hand_present_since
+        nonlocal is_paused, is_tracking_active, hand_missing_since, hand_present_since, pause_release_pending
         is_paused = not is_paused
-        if is_paused and getattr(actuator, 'is_dragging', False):
-            actuator.drag_end()
+        if is_paused:
+            pause_release_pending = True
         logger.info("SYSTEM PAUSED" if is_paused else "SYSTEM RESUMED")
-        if overlay:
+        if bridge_state is not None:
+            # One Dyne event feeds the desktop capsule and the Control Center.
+            bridge_state.publish_event(
+                "engine.paused" if is_paused else "engine.resumed",
+                "Tracking paused; native input released on the engine thread" if is_paused else "Tracking resumed",
+            )
+        elif overlay:
             overlay.show_pause_toast(is_paused)
         hand_missing_since = None
         hand_present_since = None
@@ -246,11 +282,26 @@ def run() -> None:
                 "paused": is_paused,
             })
 
+    def debug_hud_available() -> bool:
+        """True when the HUD renderer imported; otherwise log why the request is refused."""
+        if draw_debug_frame is not None:
+            return True
+        logger.error(
+            "Debug HUD requested but core.debug_overlay could not be imported (%s); "
+            "continuing without the debug window.",
+            DEBUG_HUD_IMPORT_ERROR,
+        )
+        return False
+
     debug_window_active = bool(DEBUG_GESTURES) or ("--debug" in sys.argv)
+    if debug_window_active and not debug_hud_available():
+        debug_window_active = False
     debug_window_created = False
 
     def on_activate_debug():
         nonlocal debug_window_active, debug_window_created
+        if not debug_window_active and not debug_hud_available():
+            return
         debug_window_active = not debug_window_active
         logger.info("Debug overlay: %s", "ENABLED" if debug_window_active else "DISABLED")
         if not debug_window_active:
@@ -274,6 +325,17 @@ def run() -> None:
         # Start background Control Server for Control Center UI
         control_server = ControlServer(host="127.0.0.1", port=8765)
         control_server.start()
+        bridge_state = control_server.state
+        publish_event = control_server.state.publish_event
+
+        def request_exit_from_ui() -> bool:
+            """Graceful exit requested over the bridge (launcher stop script): only a flag."""
+            nonlocal is_running
+            is_running = False
+            logger.info("Graceful exit requested via the control bridge")
+            return True
+
+        control_server.state.set_exit_cb(request_exit_from_ui)
 
         def stop_tracking_from_ui() -> bool:
             nonlocal is_paused
@@ -308,48 +370,129 @@ def run() -> None:
         if ScreenshotOverlay:
             overlay = ScreenshotOverlay(SCREENSHOT_OVERLAY_POSITION)
             overlay.set_audio_controller(processor.audio_controller)
+            # The desktop capsule is a subscriber of the same Dyne dispatcher that
+            # feeds the Control Center: one event, every surface.
+            control_server.state.events.subscribe(overlay.handle_event)
             processor._screenshot.pre_capture_cb = overlay.hide
 
             def on_screenshot_post():
+                # Runs before the file is written: overlay re-show only, no event (F-12).
                 if overlay:
                     overlay.show()
-                control_server.state.add_event("Screenshot saved", "screenshot")
 
             processor._screenshot.post_capture_cb = on_screenshot_post
+            control_server.state.set_test_countdown_cb(lambda d: overlay.start_test_countdown(d) if overlay else None)
 
-            def on_w_act(success: bool):
-                overlay.show_app_toast("WhatsApp", success)
-                if success:
-                    control_server.state.add_event("Opening WhatsApp", "whatsapp")
+        # ── Dyne event producers (independent of the desktop overlay) ─────────
+        # Every producer publishes after the real outcome is known; the overlay
+        # subscriber and the SSE bridge render the same event.
 
-            processor.set_w_activation_callback(on_w_act)
+        def on_capture_result(success: bool, path: str | None) -> None:
+            if success and path:
+                publish_event(
+                    "screenshot.captured",
+                    f"Saved {os.path.basename(path)}",
+                    source="gesture:screenshot",
+                    metadata={"path": path},
+                )
+            else:
+                publish_event(
+                    "screenshot.failed",
+                    "The capture raised an error; no file was written",
+                    source="gesture:screenshot",
+                )
 
-            def on_lip_act(action: str, success: bool):
-                overlay.show_audio_toast(action, success)
-                if success:
-                    evt = "muted" if "MUTE" in action else "unmuted"
-                    control_server.state.add_event(f"System audio {action.lower()}", evt)
+        processor._screenshot.capture_result_cb = on_capture_result
 
-            processor.set_lip_activation_callback(on_lip_act)
+        def on_w_act(success: bool):
+            if success:
+                publish_event(
+                    "app.launched",
+                    "Opening WhatsApp Desktop",
+                    source="gesture:whatsapp",
+                    metadata={"app": "WhatsApp", "gesture": "whatsapp"},
+                )
+            else:
+                publish_event(
+                    "app.launch_failed",
+                    "WhatsApp Desktop could not be launched",
+                    source="gesture:whatsapp",
+                    metadata={"app": "WhatsApp", "gesture": "whatsapp"},
+                )
 
-            def on_ear_vol(dir_name: str, vol: float, active: bool):
+        processor.set_w_activation_callback(on_w_act)
+
+        def on_lip_act(action: str, success: bool):
+            action_name = str(action).upper()
+            if not success:
+                publish_event(
+                    "audio.failed",
+                    f"Audio {action_name.lower()} failed",
+                    source="gesture:mute",
+                    metadata={"action": action_name},
+                )
+            elif "MUTE" in action_name and "UNMUTE" not in action_name:
+                publish_event("audio.muted", "System audio muted", source="gesture:mute", metadata={"action": action_name})
+            else:
+                publish_event(
+                    "audio.unmuted",
+                    "System audio unmuted" if action_name == "UNMUTED" else "System volume restored",
+                    source="gesture:mute",
+                    metadata={"action": action_name},
+                )
+
+        processor.set_lip_activation_callback(on_lip_act)
+
+        volume_coalescer = VolumeEventCoalescer(min_interval_s=0.25)
+
+        def on_ear_vol(dir_name: str, vol: float, active: bool):
+            # Continuous visualizer state goes straight to the capsule (every 50 ms
+            # tick); the bridge event is coalesced to 4 Hz plus one final event (F-13).
+            if overlay:
                 overlay.show_ear_volume(
                     dir_name, vol, active, is_muted=processor.audio_controller.is_muted
                 )
-                if active:
-                    is_up = dir_name in ("VOLUME_UP", "UP")
-                    evt = "volume-up" if is_up else "volume-down"
-                    control_server.state.add_event(f"Volume {'up' if is_up else 'down'}: {int(vol * 100)}%", evt)
+            meta = volume_coalescer.offer(dir_name, vol, active, time.perf_counter())
+            if meta is not None:
+                is_up = meta["direction"] == "up"
+                publish_event(
+                    "audio.volume",
+                    f"Volume {'up' if is_up else 'down'}: {meta['percent']}%",
+                    source="gesture:ear-volume",
+                    metadata=meta,
+                    kind="volume-up" if is_up else "volume-down",
+                )
 
-            processor.set_ear_volume_callback(on_ear_vol)
+        processor.set_ear_volume_callback(on_ear_vol)
 
-            def on_wakanda_act():
-                if overlay:
-                    overlay.show_wakanda_complete()
-                control_server.state.add_event("Workstation locked via Wakanda Forever", "wakanda-forever")
+        def on_wakanda_act(accepted: bool):
+            """
+            Wakanda Forever confirmed. `accepted` is the LockWorkStation result:
+            True = Windows accepted the lock request (not proof the desktop locked),
+            False = rejected, unavailable or raised. Each outcome is its own event;
+            the overlay subscriber renders the matching capsule, never success on failure.
+            """
+            publish_event(
+                "wakanda.confirmed",
+                "Crossed-fist hold confirmed; one LockWorkStation request sent",
+                source="gesture:wakanda-forever",
+            )
+            if accepted:
+                publish_event(
+                    "lock.accepted",
+                    "Windows accepted the LockWorkStation request (API result, not proof the desktop locked)",
+                    source="gesture:wakanda-forever",
+                    metadata={"api_result": "accepted"},
+                )
+            else:
+                publish_event(
+                    "lock.failed",
+                    "Windows rejected the LockWorkStation request",
+                    source="gesture:wakanda-forever",
+                    metadata={"api_result": "rejected"},
+                )
 
-            processor.set_wakanda_callback(on_wakanda_act)
-            control_server.state.set_test_countdown_cb(lambda d: overlay.start_test_countdown(d) if overlay else None)
+        processor.set_wakanda_callback(on_wakanda_act)
 
         def apply_ui_settings(new_settings: dict) -> None:
             settings_queue.put(new_settings)
@@ -373,7 +516,7 @@ def run() -> None:
                     processor._lip_gesture.enabled = en.get("mute", True)
                     processor._ear_volume.enabled_up = en.get("volume-up", True)
                     processor._ear_volume.enabled_down = en.get("volume-down", True)
-                    processor._wakanda.enabled = en.get("wakanda-forever", False)
+                    processor._wakanda.enabled = en.get("wakanda-forever", True)
                     processor.pointer_enabled = en.get("pointer", True)
                     processor.drag_enabled = en.get("drag", True)
                 if "power_save" in new_settings:
@@ -397,11 +540,41 @@ def run() -> None:
                         autohide_enabled=new_settings.get("island_autohide_enabled"),
                         hud_duration_s=new_settings.get("island_hud_duration_s"),
                         completion_duration_s=new_settings.get("island_completion_duration_s"),
+                        position=new_settings.get("island_position"),
+                        appearance=new_settings.get("island_appearance"),
                     )
 
         control_server.state.set_settings_change_cb(apply_ui_settings)
         apply_ui_settings(control_server.state.get_snapshot()["settings"])
         drain_settings_queue()
+
+        publish_event(
+            "engine.started",
+            f"Engine running; control bridge on http://{control_server.host}:{control_server.port}",
+            metadata={"host": control_server.host, "port": control_server.port, "pid": os.getpid()},
+        )
+        drag_tracker = DragEventTracker()
+
+        def release_drag_on_pause() -> None:
+            """
+            Main-thread drag release when tracking is paused.
+            The drag controller releases first (one native attempt with its own
+            retry); if the actuator still reports a held button, a bounded
+            force-release runs and any remaining uncertainty is published as a
+            fault event instead of being hidden.
+            """
+            left = getattr(processor, "_left", None)
+            if left is not None and hasattr(left, "release_drag"):
+                left.release_drag(reason="PAUSE")
+            if getattr(actuator, "is_dragging", False):
+                res = actuator.force_release_drag(context="PAUSE")
+                if not bool(res):
+                    publish_event(
+                        "drag.failed",
+                        "Drag release unconfirmed on pause: press and release the left mouse button",
+                        source="engine",
+                        metadata={"context": "PAUSE", "error": getattr(actuator, "_last_drag_error", None)},
+                    )
 
         logger.info("Running. Press Ctrl+Alt+Q to exit, Ctrl+Alt+P to pause, Ctrl+Alt+S for status.")
         
@@ -423,6 +596,9 @@ def run() -> None:
         try:
             while is_running:
                 drain_settings_queue()
+                if pause_release_pending:
+                    pause_release_pending = False
+                    release_drag_on_pause()
 
                 t_now = time.perf_counter()
                 t_cam_start = t_now
@@ -522,9 +698,8 @@ def run() -> None:
                             # Confirmed wake: synchronize cursor anchor on main thread
                             queried = actuator.get_cursor_pos() if hasattr(actuator, "get_cursor_pos") else None
                             processor.set_cursor_anchor(queried)
-                            control_server.state.add_event("Waking from Power Save", "wake")
-                            if overlay:
-                                overlay.show_wake_confirmed()
+                            # The overlay subscriber shows the wake capsule for this event.
+                            publish_event("power.wake", "Hand detected during probe; back to full-rate tracking", source="power")
 
                         gest_ms = 0.0
                         # Zero actuator calls during probe / confirmation!
@@ -546,10 +721,10 @@ def run() -> None:
                                     hand_present_since = now_ts
                                 elif (now_ts - hand_present_since) >= 0.15:
                                     is_tracking_active = True
-                                    if has_tracked_once and overlay:
-                                        overlay.show_tracking_toast("REACQUIRED")
                                     if has_tracked_once:
-                                        control_server.state.add_event("Hand reacquired", "reacquired")
+                                        publish_event("tracking.recovered", "Hand reacquired after a tracking gap", source="tracking")
+                                    else:
+                                        publish_event("tracking.acquired", "First hand detected; tracking active", source="tracking")
                                     has_tracked_once = True
                         else:
                             hand_present_since = None
@@ -558,9 +733,7 @@ def run() -> None:
                                     hand_missing_since = now_ts
                                 elif (now_ts - hand_missing_since) >= 0.35:
                                     is_tracking_active = False
-                                    if overlay:
-                                        overlay.show_tracking_toast("LOST")
-                                    control_server.state.add_event("Hand lost", "lost")
+                                    publish_event("tracking.lost", "No hand for 350 ms; pointer idle", source="tracking")
 
                         face_ms = 0.0
                         if face_tracker.is_ready:
@@ -593,9 +766,8 @@ def run() -> None:
                         )
 
                         if norm_dec.transition_event == PowerTransitionEvent.ENTERED_POWER_SAVE:
-                            control_server.state.add_event("Entering Power Save", "power_save")
-                            if overlay:
-                                overlay.start_power_save_countdown()
+                            # The overlay subscriber starts the countdown capsule for this event.
+                            publish_event("power.save_entered", "No activity; inference dropped to the probe cadence", source="power")
                             processor.process(None, None)
                             gest_ms = 0.0
                         else:
@@ -617,6 +789,18 @@ def run() -> None:
                 tot_face_ms += face_ms
                 tot_gest_ms += gest_ms
                 tot_ovl_ms += ovl_ms
+
+                # Drag events: observe the controller state already published in
+                # /api/status; the tracker never touches the controller/actuator.
+                left_proc_now = getattr(processor, "_left", None)
+                if left_proc_now is not None:
+                    drag_transitions = drag_tracker.observe(
+                        getattr(left_proc_now, "drag_state_name", "READY"),
+                        getattr(left_proc_now, "release_reason", None),
+                        getattr(getattr(left_proc_now, "drag_controller", None), "last_error", None),
+                    )
+                    for ev_type, ev_msg, ev_meta in drag_transitions:
+                        publish_event(ev_type, ev_msg, source="gesture:drag", metadata=ev_meta)
 
                 now = time.perf_counter()
                 dt = now - last_frame_time
@@ -689,6 +873,7 @@ def run() -> None:
                     l_h = getattr(hands, 'left', None) if 'hands' in locals() and hands else None
                     trk = "Both Hands" if (r_h and l_h) else ("Right Hand" if r_h else ("Left Hand" if l_h else "No Hands"))
                     vol_pct = int(processor.audio_controller.get_volume_scalar() * 100.0)
+                    left_proc = getattr(processor, "_left", None)
                     control_server.state.update_telemetry(
                         running=not is_paused,
                         tracking=trk,
@@ -698,6 +883,14 @@ def run() -> None:
                         muted=processor.audio_controller.is_muted,
                         active_gesture=active_gest,
                         power_state=power_manager.state.name,
+                        drag_state=getattr(left_proc, "drag_state_name", "READY"),
+                        drag_logical=bool(getattr(actuator, "is_dragging", False)),
+                        drag_error=getattr(actuator, "_last_drag_error", None),
+                        native_button=(
+                            actuator.get_native_left_button_state()
+                            if hasattr(actuator, "get_native_left_button_state")
+                            else "UNKNOWN"
+                        ),
                     )
 
                 # Update live spatial landmarks on every frame for immediate, low-latency overlay tracking
@@ -756,6 +949,23 @@ def run() -> None:
         except Exception:
             logger.error("Unhandled exception:\n%s", traceback.format_exc())
         finally:
+            # 1. Native input safety first: release a held drag before any teardown
+            #    step that could block or raise. A release that cannot be confirmed
+            #    is logged once at CRITICAL by force_release_drag and is never
+            #    presented as success.
+            try:
+                left_proc = getattr(processor, "_left", None)
+                if left_proc is not None and hasattr(left_proc, "release_drag"):
+                    left_proc.release_drag(reason="SHUTDOWN")
+            except Exception as e:
+                logger.error("Drag controller release on shutdown raised: %s", e)
+            if getattr(actuator, 'is_dragging', False):
+                actuator.force_release_drag(context="SHUTDOWN")
+            # 2. Ordinary teardown (the stopping event reaches SSE clients before the bridge closes)
+            try:
+                publish_event("engine.stopping", "Shutting down; held native input was released first")
+            except Exception as e:
+                logger.debug("Could not publish the stopping event: %s", e)
             control_server.stop()
             if overlay:
                 overlay.close()
@@ -763,9 +973,6 @@ def run() -> None:
                 cv2.destroyAllWindows()
             except Exception:
                 pass
-            # Ensure drag is never left pressed on exit
-            if getattr(actuator, 'is_dragging', False):
-                actuator.drag_end()
             _restore_windows_settings(original_settings)
             original_settings.clear()  # prevent atexit double-restore
             logger.info("=== AI Air Mouse stopped ===")

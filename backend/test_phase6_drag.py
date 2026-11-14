@@ -78,8 +78,23 @@ class TestPhase6Drag(unittest.TestCase):
         self.assertTrue(self.actuator._is_dragging)
         
     def test_left_drag_release_drops(self):
+        """
+        Unpinching releases the drag exactly once.
+
+        P0 contract: the first open frame only enters RELEASE_PENDING; the native
+        button-up is issued after the pinch stays open for release_dwell_s (80 ms).
+        The pre-P0 expectation of an immediate drop on the first frame is obsolete.
+        """
         self._simulate_time(0.5, right_pinch_norm=0.9, left_pinch_norm=0.4, steps=10)
-        self._simulate_time(0.1, right_pinch_norm=0.9, left_pinch_norm=0.9)
+        self.assertEqual(self.actuator.drags, 1)
+
+        # First open frame: release is pending, nothing dropped yet.
+        self._simulate_time(0.02, right_pinch_norm=0.9, left_pinch_norm=0.9)
+        self.assertEqual(self.actuator.drops, 0)
+        self.assertTrue(self.actuator._is_dragging)
+
+        # Sustained open hand past the 80 ms dwell -> exactly one drop.
+        self._simulate_time(0.2, right_pinch_norm=0.9, left_pinch_norm=0.9, steps=4)
         self.assertEqual(self.actuator.drags, 1)
         self.assertEqual(self.actuator.drops, 1)
         self.assertFalse(self.actuator._is_dragging)
@@ -90,11 +105,24 @@ class TestPhase6Drag(unittest.TestCase):
         self.assertEqual(self.actuator.drags, 0)
 
     def test_missing_left_cancels_drag(self):
+        """
+        Sustained left-hand tracking loss releases the drag.
+
+        P0 contract: dropouts shorter than LEFT_DRAG_LOST_TIMEOUT_S (150 ms) keep
+        the grab; the release happens once the hand has been missing longer than
+        that. The previous "released after 0.1 s" expectation only passed because
+        an earlier test module left the pre-P0 0.075 s timeout in config.
+        """
         self._simulate_time(0.5, right_pinch_norm=0.9, left_pinch_norm=0.4, steps=10) # Start drag
         self.assertTrue(self.actuator._is_dragging)
-        
-        # Left hand missing
+
+        # Left hand missing for ~100 ms: inside the dropout grace window, still held.
         self._simulate_time(0.1, right_pinch_norm=0.9, missing_left=True)
+        self.assertTrue(self.actuator._is_dragging)
+        self.assertEqual(self.actuator.drops, 0)
+
+        # Still missing past 150 ms: released exactly once.
+        self._simulate_time(0.15, right_pinch_norm=0.9, missing_left=True, steps=2)
         self.assertFalse(self.actuator._is_dragging)
         self.assertEqual(self.actuator.drops, 1)
         

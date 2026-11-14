@@ -15,6 +15,7 @@ Recognizes both forearms crossed over the chest with closed fists:
 import ctypes
 import logging
 import os
+import sys
 import time
 from enum import Enum, auto
 from typing import Callable
@@ -38,7 +39,16 @@ except ImportError:
     WAKANDA_COOLDOWN_S = 2.0
     WAKANDA_HAND_CONFIDENCE_MIN = 0.55
 
+try:
+    import config as _config  # read at construction time so a runtime change to WAKANDA_ENABLED is honoured
+except ImportError:  # pragma: no cover - config is always present in the product
+    _config = None
+
 logger = logging.getLogger(__name__)
+
+# How long the lock result stays on the HUD after a confirmed gesture before
+# the cooldown countdown replaces it.
+RESULT_DISPLAY_S = 1.0
 
 
 class WakandaState(Enum):
@@ -49,24 +59,62 @@ class WakandaState(Enum):
     COOLDOWN = auto()
 
 
+def real_lock_disabled() -> bool:
+    """True when AIRPOINT_DISABLE_REAL_LOCK asks for the mock lock (tests, demos)."""
+    return os.environ.get("AIRPOINT_DISABLE_REAL_LOCK", "").strip().lower() in ("1", "true", "yes")
+
+
+def _running_under_test_runner() -> bool:
+    """
+    Structural safety net: True when the process was started by a test runner
+    (python -m unittest / pytest, or a test_*.py script). Used only to refuse a
+    real LockWorkStation call that a test reached without the mock flag or the
+    test guard; the product entry points (main.py, run_airpoint.bat, the
+    PowerShell launcher, the validate_* harnesses) never match.
+    """
+    main_mod = sys.modules.get("__main__")
+    spec_name = getattr(getattr(main_mod, "__spec__", None), "name", "") or ""
+    main_file = os.path.basename(getattr(main_mod, "__file__", "") or "")
+    return spec_name.startswith(("unittest", "pytest", "_pytest")) or main_file.startswith("test_")
+
+
 def lock_workstation() -> bool:
     """
-    Safely executes Win32 LockWorkStation.
-    Honors AIRPOINT_DISABLE_REAL_LOCK environment flag to avoid accidental OS locking
-    during testing or developer simulation.
+    Request a Windows workstation lock through user32.LockWorkStation.
+
+    Returns True only when the API reports the request as accepted (non-zero
+    return). LockWorkStation returns once the request is queued, not once the
+    desktop is locked, so True means "lock request accepted", never "locked and
+    verified". Returns False, with the reason logged at ERROR, when the API is
+    unavailable, raises, or returns zero (GetLastError is logged).
+
+    Honours AIRPOINT_DISABLE_REAL_LOCK: when set, no native call is made and the
+    request is logged as a mock acceptance. Under the test guard the native
+    attribute raises BlockedOSActionError, which is reported as a failure.
     """
-    if os.environ.get("AIRPOINT_DISABLE_REAL_LOCK", "").strip().lower() in ("1", "true", "yes"):
-        logger.info("[MOCK] Windows LockWorkStation called (real lock disabled via AIRPOINT_DISABLE_REAL_LOCK)")
+    if real_lock_disabled():
+        logger.info("[MOCK] LockWorkStation request accepted (real lock disabled via AIRPOINT_DISABLE_REAL_LOCK)")
         return True
+    if _running_under_test_runner():
+        logger.error(
+            "Wakanda Forever: refusing a real LockWorkStation call under a test runner; "
+            "set AIRPOINT_DISABLE_REAL_LOCK=1 to mock it (lock request NOT sent)"
+        )
+        return False
     try:
-        if hasattr(ctypes, "windll") and hasattr(ctypes.windll, "user32"):
-            res = ctypes.windll.user32.LockWorkStation()
-            logger.info("Windows LockWorkStation returned: %s", res)
-            return bool(res)
-        logger.warning("ctypes.windll.user32 not available on this platform")
+        user32 = getattr(getattr(ctypes, "windll", None), "user32", None)
+        if user32 is None or not hasattr(user32, "LockWorkStation"):
+            logger.error("Wakanda Forever: user32.LockWorkStation is unavailable on this platform; lock request not sent")
+            return False
+        res = user32.LockWorkStation()
+        if res:
+            logger.info("Wakanda Forever: LockWorkStation request ACCEPTED (return=%s)", res)
+            return True
+        err = ctypes.GetLastError() if hasattr(ctypes, "GetLastError") else -1
+        logger.error("Wakanda Forever: LockWorkStation request REJECTED (return=0, GetLastError=%s)", err)
         return False
     except Exception as e:
-        logger.error("Failed to execute LockWorkStation: %s", e)
+        logger.error("Wakanda Forever: LockWorkStation call failed: %s: %s", type(e).__name__, e)
         return False
 
 
@@ -181,11 +229,15 @@ class WakandaGestureRecognizer:
     def __init__(
         self,
         lock_fn: Callable[[], bool] | None = None,
-        enabled: bool = WAKANDA_ENABLED,
+        enabled: bool | None = None,
         hold_duration: float = WAKANDA_HOLD_DURATION_S,
         grace_period: float = WAKANDA_GRACE_PERIOD_S,
         cooldown: float = WAKANDA_COOLDOWN_S,
     ) -> None:
+        if enabled is None:
+            # Resolve from the live config module so an explicit configuration
+            # change is honoured without re-importing this module.
+            enabled = getattr(_config, "WAKANDA_ENABLED", WAKANDA_ENABLED) if _config is not None else WAKANDA_ENABLED
         self._enabled: bool = bool(enabled)
         self.hold_duration: float = float(hold_duration)
         self.grace_period: float = float(grace_period)
@@ -198,7 +250,16 @@ class WakandaGestureRecognizer:
         self._trigger_time: float = 0.0
         self._status_text: str = "Ready" if self._enabled else "Disabled"
         self._progress: float = 0.0
-        self._activation_cb: Callable[[], None] | None = None
+        # Called once per confirmed gesture with the lock request result (True =
+        # Windows accepted the request; False = rejected, unavailable or raised).
+        self._activation_cb: Callable[[bool], None] | None = None
+
+        # Diagnostics (no behavioural role): the documented HUD states, the last
+        # pose rejection reason, and the last lock request outcome.
+        self._hud_text: str = "SEARCHING" if self._enabled else "DISABLED"
+        self._last_reject_reason: str = ""
+        self._last_lock_accepted: bool | None = None
+        self._result_display_until: float = 0.0
 
         logger.info(
             "WakandaGestureRecognizer initialized (enabled=%s, hold=%.1fs, cooldown=%.1fs)",
@@ -218,9 +279,11 @@ class WakandaGestureRecognizer:
             self._state = WakandaState.DISABLED
             self._progress = 0.0
             self._status_text = "Disabled"
+            self._hud_text = "DISABLED"
         elif self._state == WakandaState.DISABLED:
             self._state = WakandaState.IDLE
             self._status_text = "Ready"
+            self._hud_text = "SEARCHING"
 
     @property
     def state(self) -> WakandaState:
@@ -238,7 +301,27 @@ class WakandaGestureRecognizer:
     def status_text(self) -> str:
         return self._status_text
 
-    def set_activation_callback(self, cb: Callable[[], None]) -> None:
+    @property
+    def hud_text(self) -> str:
+        """
+        One of: DISABLED, SEARCHING [(reason)], POSE DETECTED, HOLDING x.x/2.0s,
+        CONFIRMED, LOCK REQUEST ACCEPTED [(MOCK)], LOCK REQUEST FAILED, COOLDOWN (...).
+        Updated by process(); deterministic with explicit timestamps.
+        """
+        return self._hud_text
+
+    @property
+    def last_reject_reason(self) -> str:
+        """Why the last evaluated frame did not match the pose ('' when it matched)."""
+        return self._last_reject_reason
+
+    @property
+    def last_lock_accepted(self) -> bool | None:
+        """Result of the most recent lock request (None until the first one)."""
+        return self._last_lock_accepted
+
+    def set_activation_callback(self, cb: Callable[[bool], None]) -> None:
+        """cb(accepted) is called exactly once per confirmed gesture with the lock request result."""
         self._activation_cb = cb
 
     def reset(self) -> None:
@@ -247,6 +330,8 @@ class WakandaGestureRecognizer:
         self._last_valid_time = 0.0
         self._progress = 0.0
         self._status_text = "Ready" if self.enabled else "Disabled"
+        self._hud_text = "SEARCHING" if self.enabled else "DISABLED"
+        self._last_reject_reason = ""
 
     def process(
         self,
@@ -267,27 +352,35 @@ class WakandaGestureRecognizer:
                 self._state = WakandaState.DISABLED
                 self._progress = 0.0
                 self._status_text = "Disabled"
+            self._hud_text = "DISABLED"
             return False
 
         if self._state == WakandaState.DISABLED:
             self._state = WakandaState.IDLE
             self._status_text = "Armed and ready"
+            self._hud_text = "SEARCHING"
 
         # In cooldown state, verify that the hands have uncrossed before returning to IDLE
         if self._state == WakandaState.COOLDOWN:
             self._progress = 0.0
-            if (now - self._trigger_time) < self.cooldown:
-                self._status_text = f"Cooldown ({self.cooldown - (now - self._trigger_time):.1f}s)"
+            remaining = self.cooldown - (now - self._trigger_time)
+            if remaining > 0.0:
+                self._status_text = f"Cooldown ({remaining:.1f}s)"
+                if now >= self._result_display_until:
+                    self._hud_text = f"COOLDOWN ({remaining:.1f}s)"
                 return False
             # Check if hands are uncrossed/released
             is_valid, _ = check_wakanda_pose(hands, face)
             if is_valid:
                 # Still holding crossed pose, remain in cooldown
                 self._status_text = "Release crossed arms to rearm"
+                self._hud_text = "COOLDOWN (release arms to rearm)"
                 return False
             # Hands released and cooldown expired -> re-arm
             self._state = WakandaState.IDLE
             self._status_text = "Armed and ready"
+            self._hud_text = "SEARCHING"
+            logger.info("WAKANDA: arms released after cooldown; recognizer rearmed")
             return False
 
         is_valid, reason = check_wakanda_pose(hands, face)
@@ -298,45 +391,74 @@ class WakandaGestureRecognizer:
                 self._state = WakandaState.HOLDING
                 self._hold_start_time = now
                 self._last_valid_time = now
+                self._last_reject_reason = ""
                 self._status_text = f"Holding: 0.0 / {self.hold_duration:.1f}s"
-                logger.info("Wakanda Forever hold started")
+                self._hud_text = "POSE DETECTED"
+                logger.info("WAKANDA: POSE DETECTED; hold started (%.1fs required)", self.hold_duration)
                 return True
+            self._last_reject_reason = reason
             self._status_text = "Waiting for crossed-arm pose"
+            self._hud_text = f"SEARCHING ({reason.split(' (')[0]})"
             return False
 
         if self._state == WakandaState.HOLDING:
             if is_valid:
                 self._last_valid_time = now
+                self._last_reject_reason = ""
             else:
                 # Check grace period for transient tracking blip
+                self._last_reject_reason = reason
                 time_since_valid = now - self._last_valid_time
                 if time_since_valid > self.grace_period:
-                    logger.info("Wakanda Forever hold broken (%s, grace expired %.2fs)", reason, time_since_valid)
+                    logger.info("WAKANDA: hold broken (%s, grace expired %.2fs); back to SEARCHING", reason, time_since_valid)
                     self._state = WakandaState.IDLE
                     self._progress = 0.0
                     self._status_text = "Cancelled"
+                    self._hud_text = f"SEARCHING ({reason.split(' (')[0]})"
                     return False
 
             elapsed = max(0.0, now - self._hold_start_time)
             self._progress = min(1.0, elapsed / self.hold_duration)
             self._status_text = f"Holding: {elapsed:.1f} / {self.hold_duration:.1f}s"
+            self._hud_text = (
+                "POSE DETECTED" if elapsed < self.grace_period
+                else f"HOLDING {elapsed:.1f}/{self.hold_duration:.1f}s"
+            )
 
             if elapsed >= self.hold_duration:
                 self._progress = 1.0
                 self._state = WakandaState.TRIGGERED
                 self._trigger_time = now
                 self._status_text = "WAKANDA FOREVER — LOCKING WORKSTATION"
-                logger.info("Wakanda Forever triggered! Executing workstation lock...")
+                self._hud_text = "CONFIRMED"
+                logger.info("WAKANDA: CONFIRMED after %.2fs hold; sending one workstation lock request", elapsed)
 
-                # Execute lock
-                lock_success = self._lock_fn()
+                # Exactly one lock request per confirmed gesture. The result is
+                # recorded and reported; it is never assumed from the absence of
+                # an exception.
+                try:
+                    accepted = bool(self._lock_fn())
+                except Exception as e:
+                    logger.error("WAKANDA: lock function raised %s: %s", type(e).__name__, e)
+                    accepted = False
+                self._last_lock_accepted = accepted
+                self._result_display_until = now + RESULT_DISPLAY_S
+                if accepted:
+                    self._hud_text = "LOCK REQUEST ACCEPTED (MOCK)" if real_lock_disabled() else "LOCK REQUEST ACCEPTED"
+                    logger.info("WAKANDA: LOCK REQUEST ACCEPTED")
+                else:
+                    self._hud_text = "LOCK REQUEST FAILED"
+                    self._status_text = "WAKANDA FOREVER — LOCK REQUEST FAILED"
+                    logger.error("WAKANDA: LOCK REQUEST FAILED (see the preceding log line); cooldown still applies")
+
                 if self._activation_cb:
                     try:
-                        self._activation_cb()
+                        self._activation_cb(accepted)
                     except Exception as e:
                         logger.error("Error in Wakanda activation callback: %s", e)
 
-                # Transition to cooldown
+                # Transition to cooldown: no second request while the pose is held;
+                # release is required before the recognizer rearms.
                 self._state = WakandaState.COOLDOWN
                 return True
 

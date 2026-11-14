@@ -95,6 +95,11 @@ class DragStartResult(Enum):
             return bool(self) == other
         return super().__eq__(other)
 
+    def __hash__(self) -> int:
+        # Defining __eq__ removes the inherited __hash__; restore it so members
+        # stay usable as dict keys / set members.
+        return hash(self.value)
+
 
 class DragEndResult(Enum):
     """
@@ -112,29 +117,57 @@ class DragEndResult(Enum):
             return bool(self) == other
         return super().__eq__(other)
 
+    def __hash__(self) -> int:
+        return hash(self.value)
 
-def _send_input(inp: INPUT) -> bool:
+
+class SendInputResult(Enum):
+    """
+    Honest native-input result contract for _send_input().
+
+    CONFIRMED:   SendInput inserted the expected number of events (result == 1).
+    UNCONFIRMED: SendInput returned 0; mouse_event fallback was attempted but
+                 cannot verify delivery (void-returning API). Never treated as success.
+    FAILED:      SendInput raised an exception, or user32 is unavailable.
+    """
+    CONFIRMED = "CONFIRMED"
+    UNCONFIRMED = "UNCONFIRMED"
+    FAILED = "FAILED"
+
+    def __bool__(self) -> bool:
+        return self is SendInputResult.CONFIRMED
+
+    def __eq__(self, other):
+        if isinstance(other, bool):
+            return bool(self) == other
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+
+def _send_input(inp: INPUT) -> SendInputResult:
     if _user32 is None:
         logger.warning("SendInput unavailable: user32 is None")
-        return False
+        return SendInputResult.FAILED
     try:
         result = _user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
         if result == 0:
             err = ctypes.get_last_error()
-            # If SendInput returned 0 (UIPI or isolation block), attempt mouse_event fallback
-            try:
-                if hasattr(_user32, "mouse_event"):
-                    _user32.mouse_event(inp.mi.dwFlags, inp.mi.dx, inp.mi.dy, inp.mi.mouseData, inp.mi.dwExtraInfo)
-                    logger.debug("SendInput returned 0 (err=%d); dispatched via mouse_event fallback", err)
-                    return True
-            except Exception as me_err:
-                logger.warning("mouse_event fallback failed: %s", me_err)
-            logger.warning("SendInput returned 0 (UIPI block or invalid input?). GetLastError=%d", err)
-            return False
-        return True
+            # SendInput returned 0 events inserted. We cannot confirm delivery.
+            # The mouse_event fallback is void-returning: a successful Python
+            # call does NOT establish that Windows received the event. Treat as
+            # UNCONFIRMED, never as CONFIRMED.
+            logger.warning(
+                "SendInput returned 0 events (err=%d); native input delivery "
+                "unconfirmed. mouse_event fallback cannot verify Windows receipt.", err
+            )
+            return SendInputResult.UNCONFIRMED
+        # SendInput returned 1: expected number of events inserted.
+        return SendInputResult.CONFIRMED
     except Exception as e:
         logger.error("Exception during _send_input: %s", e)
-        return False
+        return SendInputResult.FAILED
 
 
 # ── Public Actuator ───────────────────────────────────────────────────────────
@@ -317,9 +350,9 @@ class MouseActuator:
                 dwExtraInfo=0,
             ),
         )
-        return _send_input(inp)
+        return _send_input(inp) == SendInputResult.CONFIRMED
 
-    def _send_mouse_flag(self, flag: int) -> bool:
+    def _send_mouse_flag(self, flag: int) -> SendInputResult:
         inp = INPUT(
             type=INPUT_MOUSE,
             mi=MOUSEINPUT(
@@ -373,51 +406,72 @@ class MouseActuator:
                     dwExtraInfo=0,
                 ),
             )
-            ok_down = _send_input(down_inp)
+            ok_down = _send_input(down_inp) == SendInputResult.CONFIRMED
             time.sleep(0.005)
-            ok_up = _send_input(up_inp)
+            ok_up = _send_input(up_inp) == SendInputResult.CONFIRMED
             return ok_down and ok_up
         else:
-            ok_down = self._send_mouse_flag(MOUSEEVENTF_LEFTDOWN)
+            ok_down = self._send_mouse_flag(MOUSEEVENTF_LEFTDOWN) == SendInputResult.CONFIRMED
             time.sleep(0.005)
-            ok_up = self._send_mouse_flag(MOUSEEVENTF_LEFTUP)
+            ok_up = self._send_mouse_flag(MOUSEEVENTF_LEFTUP) == SendInputResult.CONFIRMED
             return ok_down and ok_up
 
     def right_click(self) -> None:
-        self._send_mouse_flag(MOUSEEVENTF_RIGHTDOWN)
-        self._send_mouse_flag(MOUSEEVENTF_RIGHTUP)
+        res_down = self._send_mouse_flag(MOUSEEVENTF_RIGHTDOWN)
+        res_up = self._send_mouse_flag(MOUSEEVENTF_RIGHTUP)
+        if res_down != SendInputResult.CONFIRMED or res_up != SendInputResult.CONFIRMED:
+            logger.warning(
+                "Right click delivery unconfirmed (down=%s, up=%s)",
+                getattr(res_down, "value", res_down),
+                getattr(res_up, "value", res_up),
+            )
 
     def drag_start(self, now: float | None = None) -> DragStartResult:
         """
         Begins dragging by depressing the left mouse button if not already dragging.
 
         Returns:
-            DragStartResult.STARTED: native button-down successfully injected.
+            DragStartResult.STARTED: native button-down successfully injected (CONFIRMED).
             DragStartResult.ALREADY_ACTIVE: drag is already active; keep-alive updated.
-            DragStartResult.FAILED: native button-down injection failed.
+            DragStartResult.FAILED: native button-down injection failed or UNCONFIRMED.
         """
         if self.is_dragging:
             self._last_drag_time = now if now is not None else time.perf_counter()
             logger.debug("Drag already active; keep-alive updated")
             return DragStartResult.ALREADY_ACTIVE
 
-        ok = self._send_mouse_flag(MOUSEEVENTF_LEFTDOWN)
-        self._last_send_input_result = ok
-        if not ok:
-            logger.error("Failed to inject native MOUSEEVENTF_LEFTDOWN for drag")
+        res = self._send_mouse_flag(MOUSEEVENTF_LEFTDOWN)
+        self._last_send_input_result = res
+
+        if res == SendInputResult.CONFIRMED:
+            # Supplementary telemetry: query native button state (diagnostic only,
+            # not an activation gate - see AIRPOINT_INDEPENDENT_ARCHITECTURE_REVIEW.md Errata E-02)
+            native_state = self.get_native_left_button_state()
+            if native_state == "DOWN":
+                logger.debug("Native button state confirmed DOWN after LEFTDOWN injection")
+            else:
+                logger.warning("Native button state not DOWN after LEFTDOWN injection (state=%s)", native_state)
+
+            self._dragging = True
+            if hasattr(self, '_is_dragging'):
+                self._is_dragging = True
+            self._last_drag_time = now if now is not None else time.perf_counter()
+            self._last_drag_error = None
+            logger.info("Drag started successfully (native MOUSEEVENTF_LEFTDOWN CONFIRMED)")
+            return DragStartResult.STARTED
+        else:
+            # UNCONFIRMED or FAILED: do NOT mark as dragging. We cannot verify
+            # that Windows received the LEFTDOWN event.
+            logger.error(
+                "Failed to inject native MOUSEEVENTF_LEFTDOWN for drag (result=%s); "
+                "not marking drag session active",
+                getattr(res, "value", res),
+            )
             self._dragging = False
             if hasattr(self, '_is_dragging'):
                 self._is_dragging = False
             self._last_drag_error = "SENDINPUT_LEFTDOWN_FAILED"
             return DragStartResult.FAILED
-
-        self._dragging = True
-        if hasattr(self, '_is_dragging'):
-            self._is_dragging = True
-        self._last_drag_time = now if now is not None else time.perf_counter()
-        self._last_drag_error = None
-        logger.info("Drag started successfully (native MOUSEEVENTF_LEFTDOWN confirmed)")
-        return DragStartResult.STARTED
 
     def keep_drag_alive(self, now: float | None = None) -> None:
         """Updates the monotonic timestamp of the active drag session."""
@@ -432,34 +486,55 @@ class MouseActuator:
         Returns:
             DragEndResult.RELEASED: drag was active and native button-up was successfully injected.
             DragEndResult.NOT_DRAGGING: drag was not active (idempotent no-op).
-            DragEndResult.FAILED: native button-up injection failed.
+            DragEndResult.FAILED: native button-up injection failed or UNCONFIRMED.
         """
         if not self.is_dragging:
             return DragEndResult.NOT_DRAGGING
 
-        ok = self._send_mouse_flag(MOUSEEVENTF_LEFTUP)
-        self._last_send_input_result = ok
-        if not ok:
-            logger.error("Failed to inject native MOUSEEVENTF_LEFTUP for drag release; retrying once safely")
-            time.sleep(0.005)
-            ok = self._send_mouse_flag(MOUSEEVENTF_LEFTUP)
-            self._last_send_input_result = ok
+        res = self._send_mouse_flag(MOUSEEVENTF_LEFTUP)
+        self._last_send_input_result = res
 
-        if not ok:
-            logger.critical(
-                "Native button-up injection failed after retry. Left mouse button state is uncertain; "
-                "retaining is_dragging=True for watchdog/cleanup retry."
-            )
-            self._last_drag_error = "SENDINPUT_LEFTUP_FAILED"
-            return DragEndResult.FAILED
+        if res == SendInputResult.CONFIRMED:
+            self._dragging = False
+            if hasattr(self, '_is_dragging'):
+                self._is_dragging = False
+            self._last_drag_time = 0.0
+            self._last_drag_error = None
+            # Supplementary telemetry
+            native_state = self.get_native_left_button_state()
+            logger.debug("Native button state after LEFTUP: %s", native_state)
+            logger.info("Drag ended successfully (native MOUSEEVENTF_LEFTUP CONFIRMED)")
+            return DragEndResult.RELEASED
 
-        self._dragging = False
-        if hasattr(self, '_is_dragging'):
-            self._is_dragging = False
-        self._last_drag_time = 0.0
-        self._last_drag_error = None
-        logger.info("Drag ended successfully (native MOUSEEVENTF_LEFTUP confirmed)")
-        return DragEndResult.RELEASED
+        # UNCONFIRMED or FAILED: retry once safely
+        logger.error(
+            "Failed to inject native MOUSEEVENTF_LEFTUP for drag release (result=%s); retrying once",
+            getattr(res, "value", res),
+        )
+        time.sleep(0.005)
+        res = self._send_mouse_flag(MOUSEEVENTF_LEFTUP)
+        self._last_send_input_result = res
+
+        if res == SendInputResult.CONFIRMED:
+            self._dragging = False
+            if hasattr(self, '_is_dragging'):
+                self._is_dragging = False
+            self._last_drag_time = 0.0
+            self._last_drag_error = None
+            native_state = self.get_native_left_button_state()
+            logger.debug("Native button state after LEFTUP retry: %s", native_state)
+            logger.info("Drag ended successfully on retry (native MOUSEEVENTF_LEFTUP CONFIRMED)")
+            return DragEndResult.RELEASED
+
+        # Still unconfirmed/failed after retry. Keep is_dragging=True so the
+        # watchdog and cleanup paths can attempt recovery. Do NOT silently
+        # clear state - the native button state is uncertain.
+        logger.critical(
+            "Native button-up injection failed after retry. Left mouse button state is uncertain; "
+            "retaining is_dragging=True for watchdog/cleanup retry."
+        )
+        self._last_drag_error = "SENDINPUT_LEFTUP_FAILED"
+        return DragEndResult.FAILED
 
     def check_drag_watchdog(self, now: float | None = None, timeout_s: float = 0.25) -> bool:
         """
@@ -479,8 +554,53 @@ class MouseActuator:
                 timeout_s,
             )
             res = self.drag_end()
+            if not bool(res):
+                # Release still unconfirmed: keep is_dragging=True so the fault stays
+                # visible, but re-arm the watchdog so the next attempt happens after
+                # another timeout_s instead of on every frame.
+                self._last_drag_time = now
             return bool(res)
         return False
+
+    def force_release_drag(
+        self,
+        max_attempts: int = 3,
+        retry_delay_s: float = 0.02,
+        context: str = "SHUTDOWN",
+    ) -> DragEndResult:
+        """
+        Bounded best-effort release of a held native left button for pause and
+        shutdown paths (drag_end() itself already retries once per attempt).
+
+        The logical drag flag is retained when every attempt fails so the fault
+        stays observable; exactly one CRITICAL line is logged in that case and
+        _last_drag_error records the context.
+        """
+        if not self.is_dragging:
+            return DragEndResult.NOT_DRAGGING
+
+        attempts = max(1, int(max_attempts))
+        res: DragEndResult = DragEndResult.FAILED
+        for attempt in range(1, attempts + 1):
+            res = self.drag_end()
+            if bool(res) or res == DragEndResult.NOT_DRAGGING:
+                logger.info(
+                    "%s: native left button released (attempt %d/%d)", context, attempt, attempts
+                )
+                return res
+            if attempt < attempts:
+                time.sleep(retry_delay_s)
+
+        self._last_drag_error = f"DRAG_RELEASE_UNCONFIRMED_AT_{context}"
+        logger.critical(
+            "%s: native left button release UNCONFIRMED after %d attempts "
+            "(native_button=%s). The physical button state is unknown; press and "
+            "release the physical left mouse button to clear it.",
+            context,
+            attempts,
+            self.get_native_left_button_state(),
+        )
+        return res
 
 
     def get_native_left_button_state(self) -> str:

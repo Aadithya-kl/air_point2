@@ -35,19 +35,25 @@ if (-not $SkipTests) {
     $GateStart = Get-Date
     Push-Location $BackendDir
     try {
+        # Isolated settings file, OS-action guard (blocks real SendInput/SetCursorPos/
+        # keyboard/LockWorkStation/app launch/camera opens) and mocked workstation lock.
         $env:AIRPOINT_SETTINGS_PATH = ":memory:"
-        & $PythonExe -m unittest discover -p "test_*.py"
+        $env:AIRPOINT_ENABLE_TEST_GUARD = "1"
+        $env:AIRPOINT_DISABLE_REAL_LOCK = "1"
+        & $PythonExe -m unittest discover -s . -p "test_*.py"
         $ExitCode = $LASTEXITCODE
         $Duration = ((Get-Date) - $GateStart).TotalSeconds
         if ($ExitCode -eq 0) {
             Write-Host "[GATE 1/4] PASSED in $([math]::Round($Duration, 2))s" -ForegroundColor Green
-            $Results.Add([PSCustomObject]@{ Gate = "Backend Unit Tests (224 tests)"; Status = "PASS"; Duration = "$([math]::Round($Duration, 1))s" })
+            $Results.Add([PSCustomObject]@{ Gate = "Backend Unit Tests (guarded)"; Status = "PASS"; Duration = "$([math]::Round($Duration, 1))s" })
         } else {
             Write-Host "[GATE 1/4] FAILED (Exit code: $ExitCode)" -ForegroundColor Red
-            $Results.Add([PSCustomObject]@{ Gate = "Backend Unit Tests"; Status = "FAIL"; Duration = "$([math]::Round($Duration, 1))s" })
+            $Results.Add([PSCustomObject]@{ Gate = "Backend Unit Tests (guarded)"; Status = "FAIL"; Duration = "$([math]::Round($Duration, 1))s" })
         }
     } finally {
         Remove-Item Env:\AIRPOINT_SETTINGS_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:\AIRPOINT_ENABLE_TEST_GUARD -ErrorAction SilentlyContinue
+        Remove-Item Env:\AIRPOINT_DISABLE_REAL_LOCK -ErrorAction SilentlyContinue
         Pop-Location
     }
 } else {
@@ -84,7 +90,7 @@ if (-not $SkipTests) {
         $Duration = ((Get-Date) - $GateStart).TotalSeconds
         if ($ExitCode -eq 0) {
             Write-Host "[GATE 3/4] PASSED in $([math]::Round($Duration, 2))s" -ForegroundColor Green
-            $Results.Add([PSCustomObject]@{ Gate = "Frontend Vitest (48 tests)"; Status = "PASS"; Duration = "$([math]::Round($Duration, 1))s" })
+            $Results.Add([PSCustomObject]@{ Gate = "Frontend Vitest"; Status = "PASS"; Duration = "$([math]::Round($Duration, 1))s" })
         } else {
             Write-Host "[GATE 3/4] FAILED (Exit code: $ExitCode)" -ForegroundColor Red
             $Results.Add([PSCustomObject]@{ Gate = "Frontend Vitest"; Status = "FAIL"; Duration = "$([math]::Round($Duration, 1))s" })
